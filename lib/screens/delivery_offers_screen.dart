@@ -1,0 +1,522 @@
+import 'package:flutter/material.dart';
+import 'dart:async';
+import '../core/supabase_config.dart';
+import '../services/realtime_service.dart';
+import '../services/auth_service.dart';
+import '../models/delivery.dart';
+
+class DeliveryOffersScreen extends StatefulWidget {
+  const DeliveryOffersScreen({super.key});
+
+  @override
+  State<DeliveryOffersScreen> createState() => _DeliveryOffersScreenState();
+}
+
+class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
+  final RealtimeService _realtimeService = RealtimeService();
+  final AuthService _authService = AuthService();
+  
+  List<Delivery> _availableOffers = [];
+  List<Delivery> _pendingDeliveries = [];
+  StreamSubscription? _newOffersSubscription;
+  StreamSubscription? _deliveryUpdatesSubscription;
+  bool _isLoading = true;
+  String? _driverId;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeRealtimeService();
+  }
+
+  @override
+  void dispose() {
+    _newOffersSubscription?.cancel();
+    _deliveryUpdatesSubscription?.cancel();
+    _realtimeService.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initializeRealtimeService() async {
+    try {
+      final user = _authService.currentUser;
+      if (user == null) return;
+      
+      _driverId = user.id;
+      
+      // Initialize realtime subscriptions
+      await _realtimeService.initializeRealtimeSubscriptions(_driverId!);
+      
+      // Listen for new delivery offers
+      _newOffersSubscription = _realtimeService.newDeliveries.listen(
+        (delivery) {
+          setState(() {
+            _availableOffers.add(delivery);
+          });
+          _showNewOfferNotification(delivery);
+        },
+      );
+      
+      // Listen for delivery updates
+      _deliveryUpdatesSubscription = _realtimeService.deliveryUpdates.listen(
+        (delivery) {
+          setState(() {
+            // Update pending deliveries list
+            final index = _pendingDeliveries.indexWhere((d) => d.id == delivery.id);
+            if (index != -1) {
+              _pendingDeliveries[index] = delivery;
+            } else if (delivery.driverId == _driverId) {
+              _pendingDeliveries.add(delivery);
+            }
+            
+            // Remove from available offers if accepted
+            _availableOffers.removeWhere((d) => d.id == delivery.id);
+          });
+        },
+      );
+      
+      // Load initial data
+      await _loadInitialData();
+      
+    } catch (e) {
+      print('Error initializing realtime service: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to connect to delivery service: $e'),
+            backgroundColor: SwiftDashColors.dangerRed,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadInitialData() async {
+    if (_driverId == null) return;
+    
+    try {
+      // Load available offers and pending deliveries
+      final offers = await _realtimeService.getAvailableDeliveryOffers();
+      final pending = await _realtimeService.getPendingDeliveries(_driverId!);
+      
+      setState(() {
+        _availableOffers = offers;
+        _pendingDeliveries = pending;
+      });
+    } catch (e) {
+      print('Error loading initial data: $e');
+    }
+  }
+
+  void _showNewOfferNotification(Delivery delivery) {
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            Icon(Icons.local_shipping, color: SwiftDashColors.white),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'New delivery offer: ${delivery.pickupAddress}',
+                style: const TextStyle(color: SwiftDashColors.white),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: SwiftDashColors.lightBlue,
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'View',
+          textColor: SwiftDashColors.white,
+          onPressed: () {
+            // Auto-scroll to the new offer or show details
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _acceptOffer(Delivery delivery) async {
+    if (_driverId == null) return;
+    
+    try {
+      final success = await _realtimeService.acceptDeliveryOffer(delivery.id, _driverId!);
+      
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Delivery accepted successfully!'),
+            backgroundColor: SwiftDashColors.successGreen,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Delivery was already taken by another driver'),
+            backgroundColor: SwiftDashColors.warningOrange,
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to accept delivery: $e'),
+          backgroundColor: SwiftDashColors.dangerRed,
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Delivery Offers'),
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Delivery Offers'),
+        backgroundColor: SwiftDashColors.darkBlue,
+      ),
+      body: RefreshIndicator(
+        onRefresh: _loadInitialData,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Current Deliveries Section
+              if (_pendingDeliveries.isNotEmpty) ...[
+                Text(
+                  'Current Deliveries',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: SwiftDashColors.darkBlue,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ..._pendingDeliveries.map((delivery) => _buildCurrentDeliveryCard(delivery)),
+                const SizedBox(height: 24),
+              ],
+              
+              // Available Offers Section
+              Text(
+                'Available Offers',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: SwiftDashColors.darkBlue,
+                ),
+              ),
+              const SizedBox(height: 12),
+              
+              if (_availableOffers.isEmpty)
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      children: [
+                        Icon(
+                          Icons.delivery_dining,
+                          size: 48,
+                          color: SwiftDashColors.textGrey.withOpacity(0.5),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'No delivery offers available',
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            color: SwiftDashColors.textGrey,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'New offers will appear here automatically',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: SwiftDashColors.textGrey,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                ..._availableOffers.map((delivery) => _buildOfferCard(delivery)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOfferCard(Delivery delivery) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: SwiftDashColors.lightBlue.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'NEW OFFER',
+                    style: TextStyle(
+                      color: SwiftDashColors.lightBlue,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '₱${delivery.totalPrice.toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    color: SwiftDashColors.successGreen,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            
+            // Pickup Location
+            Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: SwiftDashColors.lightBlue,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Pickup',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: SwiftDashColors.textGrey,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        delivery.pickupAddress,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 8),
+            
+            // Dropoff Location
+            Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: SwiftDashColors.dangerRed,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Dropoff',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: SwiftDashColors.textGrey,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        delivery.deliveryAddress,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 16),
+            
+            // Action Button
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: () => _acceptOffer(delivery),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: SwiftDashColors.successGreen,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: Text(
+                  'Accept Delivery',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: SwiftDashColors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCurrentDeliveryCard(Delivery delivery) {
+    Color statusColor;
+    String statusText;
+    
+    switch (delivery.status) {
+      case DeliveryStatus.driverAssigned:
+        statusColor = SwiftDashColors.lightBlue;
+        statusText = 'ASSIGNED';
+        break;
+      case DeliveryStatus.packageCollected:
+        statusColor = SwiftDashColors.warningOrange;
+        statusText = 'PICKED UP';
+        break;
+      case DeliveryStatus.inTransit:
+        statusColor = SwiftDashColors.warningOrange;
+        statusText = 'IN TRANSIT';
+        break;
+      default:
+        statusColor = SwiftDashColors.textGrey;
+        statusText = delivery.status.displayName.toUpperCase();
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    statusText,
+                    style: TextStyle(
+                      color: statusColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Text(
+                  '₱${delivery.totalPrice.toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: SwiftDashColors.darkBlue,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${delivery.pickupAddress} → ${delivery.deliveryAddress}',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Action buttons based on status
+            Row(
+              children: [
+                if (delivery.status == DeliveryStatus.driverAssigned)
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        await _realtimeService.updateDeliveryStatus(delivery.id, 'package_collected');
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: SwiftDashColors.lightBlue,
+                      ),
+                      child: const Text('Mark as Picked Up'),
+                    ),
+                  ),
+                if (delivery.status == DeliveryStatus.packageCollected)
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        await _realtimeService.updateDeliveryStatus(delivery.id, 'in_transit');
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: SwiftDashColors.warningOrange,
+                      ),
+                      child: const Text('Start Delivery'),
+                    ),
+                  ),
+                if (delivery.status == DeliveryStatus.inTransit)
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        await _realtimeService.updateDeliveryStatus(delivery.id, 'delivered');
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: SwiftDashColors.successGreen,
+                      ),
+                      child: const Text('Mark as Delivered'),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
