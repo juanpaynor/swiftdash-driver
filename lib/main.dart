@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/supabase_config.dart';
 import 'screens/auth_wrapper.dart';
 import 'screens/delivery_debug_screen.dart';
+import 'screens/debug_vehicle_types_screen.dart';
 import 'services/auth_service.dart';
 import 'services/realtime_service.dart';
 import 'models/driver.dart';
@@ -168,6 +169,12 @@ class _DriverDashboardState extends State<DriverDashboard> {
                     builder: (context) => const DeliveryDebugScreen(),
                   ),
                 );
+              } else if (value == 'debug_vehicles') {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const DebugVehicleTypesScreen(),
+                  ),
+                );
               }
             },
             itemBuilder: (BuildContext context) => [
@@ -188,6 +195,16 @@ class _DriverDashboardState extends State<DriverDashboard> {
                     Icon(Icons.bug_report, color: SwiftDashColors.lightBlue),
                     SizedBox(width: 8),
                     Text('Debug Delivery'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'debug_vehicles',
+                child: Row(
+                  children: [
+                    Icon(Icons.local_shipping, color: SwiftDashColors.lightBlue),
+                    SizedBox(width: 8),
+                    Text('Debug Vehicles'),
                   ],
                 ),
               ),

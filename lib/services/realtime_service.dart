@@ -11,11 +11,17 @@ class RealtimeService {
   final _newDeliveriesController = StreamController<Delivery>.broadcast();
   final _deliveryUpdatesController = StreamController<Delivery>.broadcast();
   final _driverStatusController = StreamController<Map<String, dynamic>>.broadcast();
+  final _offerModalController = StreamController<Delivery>.broadcast();
   
   // Public streams
   Stream<Delivery> get newDeliveries => _newDeliveriesController.stream;
   Stream<Delivery> get deliveryUpdates => _deliveryUpdatesController.stream;
   Stream<Map<String, dynamic>> get driverStatusUpdates => _driverStatusController.stream;
+  Stream<Delivery> get offerModalStream => _offerModalController.stream;
+  
+  // Active offer tracking
+  Delivery? _currentOffer;
+  Timer? _offerTimeoutTimer;
   
   // Initialize realtime subscriptions
   Future<void> initializeRealtimeSubscriptions(String driverId) async {
@@ -52,7 +58,14 @@ class RealtimeService {
             print('New delivery offer received: ${payload.newRecord}');
             try {
               final delivery = Delivery.fromJson(payload.newRecord);
-              _newDeliveriesController.add(delivery);
+              
+              // Trigger offer modal for pending deliveries
+              if (delivery.status == DeliveryStatus.pending) {
+                _handleNewOffer(delivery);
+              } else {
+                // Regular new delivery for list
+                _newDeliveriesController.add(delivery);
+              }
             } catch (e) {
               print('Error parsing new delivery: $e');
             }
@@ -80,6 +93,31 @@ class RealtimeService {
     
     await _deliveriesChannel!.subscribe();
     print('Subscribed to deliveries channel');
+  }
+
+  // Handle new offer with modal trigger
+  void _handleNewOffer(Delivery delivery) {
+    // Cancel any existing offer
+    if (_currentOffer != null) {
+      _cancelCurrentOffer();
+    }
+    
+    _currentOffer = delivery;
+    _offerModalController.add(delivery);
+    
+    // Set timeout timer (customer app handles reassignment)
+    _offerTimeoutTimer = Timer(const Duration(minutes: 5), () {
+      _cancelCurrentOffer();
+    });
+    
+    print('New offer modal triggered for delivery: ${delivery.id}');
+  }
+
+  // Cancel current offer
+  void _cancelCurrentOffer() {
+    _offerTimeoutTimer?.cancel();
+    _offerTimeoutTimer = null;
+    _currentOffer = null;
   }
   
   // Subscribe to driver profile updates
@@ -260,9 +298,13 @@ class RealtimeService {
         _driverChannel = null;
       }
       
+      // Cancel any active offer timer
+      _offerTimeoutTimer?.cancel();
+      
       await _newDeliveriesController.close();
       await _deliveryUpdatesController.close();
       await _driverStatusController.close();
+      await _offerModalController.close();
       
       print('Realtime subscriptions disposed');
     } catch (e) {

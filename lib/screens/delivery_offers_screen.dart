@@ -3,7 +3,10 @@ import 'dart:async';
 import '../core/supabase_config.dart';
 import '../services/realtime_service.dart';
 import '../services/auth_service.dart';
+import '../services/mapbox_service.dart';
 import '../models/delivery.dart';
+import '../widgets/route_preview_map.dart';
+import '../widgets/delivery_offer_modal.dart';
 
 class DeliveryOffersScreen extends StatefulWidget {
   const DeliveryOffersScreen({super.key});
@@ -20,8 +23,16 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
   List<Delivery> _pendingDeliveries = [];
   StreamSubscription? _newOffersSubscription;
   StreamSubscription? _deliveryUpdatesSubscription;
+  StreamSubscription? _offerModalSubscription;
   bool _isLoading = true;
   String? _driverId;
+  
+  // Cache for route data
+  final Map<String, RouteData> _routeCache = {};
+  final Map<String, Future<RouteData?>> _routeRequests = {};
+  
+  // Offer modal tracking
+  bool _isOfferModalOpen = false;
 
   @override
   void initState() {
@@ -33,6 +44,7 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
   void dispose() {
     _newOffersSubscription?.cancel();
     _deliveryUpdatesSubscription?.cancel();
+    _offerModalSubscription?.cancel();
     _realtimeService.dispose();
     super.dispose();
   }
@@ -72,6 +84,15 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
             // Remove from available offers if accepted
             _availableOffers.removeWhere((d) => d.id == delivery.id);
           });
+        },
+      );
+      
+      // Listen for offer modal triggers
+      _offerModalSubscription = _realtimeService.offerModalStream.listen(
+        (delivery) {
+          if (!_isOfferModalOpen && mounted) {
+            _showOfferModal(delivery);
+          }
         },
       );
       
@@ -175,6 +196,126 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
     }
   }
 
+  void _showOfferModal(Delivery delivery) {
+    if (_isOfferModalOpen) return;
+    
+    setState(() {
+      _isOfferModalOpen = true;
+    });
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.transparent,
+      builder: (context) => DeliveryOfferModal(
+        delivery: delivery,
+        onAccept: () async {
+          Navigator.of(context).pop();
+          setState(() {
+            _isOfferModalOpen = false;
+          });
+          await _acceptOffer(delivery);
+        },
+        onDecline: () {
+          Navigator.of(context).pop();
+          setState(() {
+            _isOfferModalOpen = false;
+          });
+          // Just remove locally - customer app handles reassignment
+          print('Offer declined for delivery: ${delivery.id}');
+        },
+      ),
+    );
+  }
+
+  Future<RouteData?> _getRouteData(Delivery delivery) async {
+    final cacheKey = '${delivery.pickupLatitude},${delivery.pickupLongitude}-${delivery.deliveryLatitude},${delivery.deliveryLongitude}';
+    
+    // Check cache first
+    if (_routeCache.containsKey(cacheKey)) {
+      return _routeCache[cacheKey];
+    }
+    
+    // Check if request is already in progress
+    if (_routeRequests.containsKey(cacheKey)) {
+      return await _routeRequests[cacheKey];
+    }
+    
+    // Make new request
+    final request = MapboxService.getRoute(
+      delivery.pickupLatitude,
+      delivery.pickupLongitude,
+      delivery.deliveryLatitude,
+      delivery.deliveryLongitude,
+    );
+    
+    _routeRequests[cacheKey] = request;
+    
+    try {
+      final routeData = await request;
+      if (routeData != null) {
+        _routeCache[cacheKey] = routeData;
+      }
+      return routeData;
+    } finally {
+      _routeRequests.remove(cacheKey);
+    }
+  }
+
+  void _showTestOfferModal() {
+    // Create a test delivery for modal testing
+    final testDelivery = Delivery(
+      id: 'test-delivery-id',
+      customerId: 'test-customer-id',
+      driverId: null,
+      vehicleTypeId: 'test-vehicle-type-id',
+      status: DeliveryStatus.pending,
+      pickupAddress: 'SM Mall of Asia, Pasay City, Metro Manila',
+      pickupLatitude: 14.5358,
+      pickupLongitude: 120.9822,
+      pickupContactName: 'Test Customer',
+      pickupContactPhone: '+63 912 345 6789',
+      deliveryAddress: 'BGC The Fort, Taguig City, Metro Manila',
+      deliveryLatitude: 14.5515,
+      deliveryLongitude: 121.0511,
+      deliveryContactName: 'John Doe',
+      deliveryContactPhone: '+63 998 765 4321',
+      packageDescription: 'Food delivery - 2 burgers, fries, drinks',
+      totalPrice: 250.00,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    
+    _showOfferModal(testDelivery);
+  }
+
+  Widget _buildStatItem(IconData icon, String label, String value, Color color) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 16, color: color),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: SwiftDashColors.textGrey,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -192,6 +333,15 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
       appBar: AppBar(
         title: const Text('Delivery Offers'),
         backgroundColor: SwiftDashColors.darkBlue,
+        actions: [
+          // Debug button to test offer modal
+          if (mounted)
+            IconButton(
+              icon: const Icon(Icons.bug_report),
+              onPressed: _showTestOfferModal,
+              tooltip: 'Test Offer Modal',
+            ),
+        ],
       ),
       body: RefreshIndicator(
         onRefresh: _loadInitialData,
@@ -272,6 +422,7 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Header with earnings and status
             Row(
               children: [
                 Container(
@@ -290,15 +441,142 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
                   ),
                 ),
                 const Spacer(),
-                Text(
-                  '₱${delivery.totalPrice.toStringAsFixed(2)}',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: SwiftDashColors.successGreen,
-                    fontWeight: FontWeight.bold,
-                  ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '₱${delivery.totalPrice.toStringAsFixed(2)}',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: SwiftDashColors.successGreen,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      'estimated',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: SwiftDashColors.textGrey,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
+            const SizedBox(height: 12),
+            
+            // Route preview
+            FutureBuilder<RouteData?>(
+              future: _getRouteData(delivery),
+              builder: (context, snapshot) {
+                final routeData = snapshot.data;
+                final screenWidth = MediaQuery.of(context).size.width;
+                
+                return Column(
+                  children: [
+                    // Route preview map/fallback
+                    if (snapshot.connectionState == ConnectionState.waiting)
+                      Container(
+                        height: MediaQuery.of(context).size.height * 0.25,
+                        constraints: const BoxConstraints(
+                          minHeight: 180,
+                          maxHeight: 300,
+                        ),
+                        decoration: BoxDecoration(
+                          color: SwiftDashColors.backgroundGrey,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: SwiftDashColors.textGrey.withOpacity(0.3)),
+                        ),
+                        child: const Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              CircularProgressIndicator(),
+                              SizedBox(height: 8),
+                              Text(
+                                'Loading route...',
+                                style: TextStyle(
+                                  color: SwiftDashColors.textGrey,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else if (routeData != null)
+                      RoutePreviewMap(
+                        pickupLat: delivery.pickupLatitude,
+                        pickupLng: delivery.pickupLongitude,
+                        deliveryLat: delivery.deliveryLatitude,
+                        deliveryLng: delivery.deliveryLongitude,
+                        routeData: routeData,
+                      )
+                    else
+                      SimpleRoutePreview(
+                        pickupAddress: delivery.pickupAddress,
+                        deliveryAddress: delivery.deliveryAddress,
+                        routeData: null,
+                      ),
+                    
+                    const SizedBox(height: 16),
+                    
+                    // Route stats row
+                    if (routeData != null)
+                      Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: screenWidth < 360 ? 12 : 16,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: SwiftDashColors.backgroundGrey,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _buildStatItem(
+                                Icons.straighten,
+                                'Distance',
+                                MapboxService.formatDistance(routeData.distance),
+                                SwiftDashColors.lightBlue,
+                              ),
+                            ),
+                            Container(
+                              width: 1,
+                              height: 30,
+                              color: SwiftDashColors.textGrey.withOpacity(0.3),
+                            ),
+                            Expanded(
+                              child: _buildStatItem(
+                                Icons.access_time,
+                                'Duration',
+                                MapboxService.formatDuration(routeData.duration),
+                                SwiftDashColors.warningOrange,
+                              ),
+                            ),
+                            if (delivery.packageDescription.isNotEmpty) ...[
+                              Container(
+                                width: 1,
+                                height: 30,
+                                color: SwiftDashColors.textGrey.withOpacity(0.3),
+                              ),
+                              Expanded(
+                                child: _buildStatItem(
+                                  Icons.inventory_2,
+                                  'Package',
+                                  delivery.packageDescription,
+                                  SwiftDashColors.darkBlue,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+            
             const SizedBox(height: 12),
             
             // Pickup Location
@@ -308,7 +586,7 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
                   width: 8,
                   height: 8,
                   decoration: BoxDecoration(
-                    color: SwiftDashColors.lightBlue,
+                    color: SwiftDashColors.successGreen,
                     shape: BoxShape.circle,
                   ),
                 ),

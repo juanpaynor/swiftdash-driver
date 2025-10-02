@@ -7,17 +7,23 @@ class VehicleTypeService {
   // Get all active vehicle types
   Future<List<VehicleType>> getActiveVehicleTypes() async {
     try {
+      print('VehicleTypeService: Fetching active vehicle types...');
       final response = await _supabase
           .from('vehicle_types')
           .select('*')
           .eq('is_active', true)
           .order('max_weight_kg'); // Order by weight capacity
       
-      return (response as List)
+      print('VehicleTypeService: Raw response: $response');
+      
+      final vehicleTypes = (response as List)
           .map((data) => VehicleType.fromJson(data))
           .toList();
+          
+      print('VehicleTypeService: Parsed ${vehicleTypes.length} vehicle types');
+      return vehicleTypes;
     } catch (e) {
-      print('Error fetching vehicle types: $e');
+      print('VehicleTypeService: Error fetching vehicle types: $e');
       throw Exception('Failed to load vehicle types');
     }
   }

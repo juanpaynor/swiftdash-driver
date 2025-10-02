@@ -38,6 +38,12 @@ class Delivery {
   final int? customerRating;
   final int? driverRating;
   
+  // Proof of Delivery
+  final String? proofPhotoUrl;
+  final String? recipientName;
+  final String? deliveryNotes;
+  final String? signatureData;
+  
   const Delivery({
     required this.id,
     required this.customerId,
@@ -67,6 +73,10 @@ class Delivery {
     required this.totalPrice,
     this.customerRating,
     this.driverRating,
+    this.proofPhotoUrl,
+    this.recipientName,
+    this.deliveryNotes,
+    this.signatureData,
   });
   
   // Calculate driver earnings (you can adjust this percentage)
@@ -119,6 +129,10 @@ class Delivery {
       totalPrice: json['total_price'].toDouble(),
       customerRating: json['customer_rating'],
       driverRating: json['driver_rating'],
+      proofPhotoUrl: json['proof_photo_url'],
+      recipientName: json['recipient_name'],
+      deliveryNotes: json['delivery_notes'],
+      signatureData: json['signature_data'],
     );
   }
   
@@ -152,6 +166,10 @@ class Delivery {
       'total_price': totalPrice,
       'customer_rating': customerRating,
       'driver_rating': driverRating,
+      'proof_photo_url': proofPhotoUrl,
+      'recipient_name': recipientName,
+      'delivery_notes': deliveryNotes,
+      'signature_data': signatureData,
     };
   }
 }
