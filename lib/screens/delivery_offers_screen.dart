@@ -6,7 +6,7 @@ import '../services/auth_service.dart';
 import '../services/mapbox_service.dart';
 import '../models/delivery.dart';
 import '../widgets/route_preview_map.dart';
-import '../widgets/delivery_offer_modal.dart';
+// Legacy modal removed - use improved modal via RealtimeService.showImprovedOfferModal
 
 class DeliveryOffersScreen extends StatefulWidget {
   const DeliveryOffersScreen({super.key});
@@ -165,12 +165,12 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
     );
   }
 
-  Future<void> _acceptOffer(Delivery delivery) async {
-    if (_driverId == null) return;
-    
+  Future<bool> _acceptOffer(Delivery delivery) async {
+    if (_driverId == null) return false;
+
     try {
       final success = await _realtimeService.acceptDeliveryOffer(delivery.id, _driverId!);
-      
+
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -178,6 +178,7 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
             backgroundColor: SwiftDashColors.successGreen,
           ),
         );
+        return true;
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -185,6 +186,7 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
             backgroundColor: SwiftDashColors.warningOrange,
           ),
         );
+        return false;
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -193,6 +195,7 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
           backgroundColor: SwiftDashColors.dangerRed,
         ),
       );
+      return false;
     }
   }
 
@@ -203,28 +206,20 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
       _isOfferModalOpen = true;
     });
     
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      barrierColor: Colors.transparent,
-      builder: (context) => DeliveryOfferModal(
-        delivery: delivery,
-        onAccept: () async {
-          Navigator.of(context).pop();
-          setState(() {
-            _isOfferModalOpen = false;
-          });
-          await _acceptOffer(delivery);
-        },
-        onDecline: () {
-          Navigator.of(context).pop();
-          setState(() {
-            _isOfferModalOpen = false;
-          });
-          // Just remove locally - customer app handles reassignment
-          print('Offer declined for delivery: ${delivery.id}');
-        },
-      ),
+    // Use improved offer modal which awaits DB-confirmed accept
+    RealtimeService.showImprovedOfferModal(
+      context,
+      delivery,
+      (String deliveryId, String driverId) async {
+        // call accept logic and close modal only on success
+        final ok = await _acceptOffer(delivery);
+        if (ok) {
+          // mark modal open flag false — caller will dismiss modal via the improved modal flow
+          setState(() => _isOfferModalOpen = false);
+        }
+        return ok;
+      },
+      _driverId!,
     );
   }
 
@@ -262,32 +257,7 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
     }
   }
 
-  void _showTestOfferModal() {
-    // Create a test delivery for modal testing
-    final testDelivery = Delivery(
-      id: 'test-delivery-id',
-      customerId: 'test-customer-id',
-      driverId: null,
-      vehicleTypeId: 'test-vehicle-type-id',
-      status: DeliveryStatus.pending,
-      pickupAddress: 'SM Mall of Asia, Pasay City, Metro Manila',
-      pickupLatitude: 14.5358,
-      pickupLongitude: 120.9822,
-      pickupContactName: 'Test Customer',
-      pickupContactPhone: '+63 912 345 6789',
-      deliveryAddress: 'BGC The Fort, Taguig City, Metro Manila',
-      deliveryLatitude: 14.5515,
-      deliveryLongitude: 121.0511,
-      deliveryContactName: 'John Doe',
-      deliveryContactPhone: '+63 998 765 4321',
-      packageDescription: 'Food delivery - 2 burgers, fries, drinks',
-      totalPrice: 250.00,
-      createdAt: DateTime.now(),
-      updatedAt: DateTime.now(),
-    );
-    
-    _showOfferModal(testDelivery);
-  }
+  // Test helper removed for production builds
 
   Widget _buildStatItem(IconData icon, String label, String value, Color color) {
     return Column(
@@ -333,15 +303,7 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
       appBar: AppBar(
         title: const Text('Delivery Offers'),
         backgroundColor: SwiftDashColors.darkBlue,
-        actions: [
-          // Debug button to test offer modal
-          if (mounted)
-            IconButton(
-              icon: const Icon(Icons.bug_report),
-              onPressed: _showTestOfferModal,
-              tooltip: 'Test Offer Modal',
-            ),
-        ],
+        actions: [],
       ),
       body: RefreshIndicator(
         onRefresh: _loadInitialData,
@@ -657,7 +619,9 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () => _acceptOffer(delivery),
+                  onPressed: () async {
+                    await _acceptOffer(delivery);
+                  },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: SwiftDashColors.successGreen,
                   padding: const EdgeInsets.symmetric(vertical: 12),

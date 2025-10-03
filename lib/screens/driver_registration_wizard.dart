@@ -45,6 +45,7 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
   // Images
   File? _profileImage;
   File? _vehicleImage;
+  File? _ltfrbImage;
 
   @override
   void initState() {
@@ -89,16 +90,31 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
     }
   }
 
-  Future<void> _pickImage(bool isProfile) async {
+  Future<void> _pickImage(String imageType) async {
     try {
       final File? image = await _documentService.showImageSourceDialog(context);
       
       if (image != null) {
+        // Validate file size (5MB limit)
+        final fileSizeInBytes = await image.length();
+        final fileSizeInMB = fileSizeInBytes / (1024 * 1024);
+        
+        if (fileSizeInMB > 5) {
+          _showError('Image file size must not exceed 5MB. Current size: ${fileSizeInMB.toStringAsFixed(1)}MB');
+          return;
+        }
+        
         setState(() {
-          if (isProfile) {
-            _profileImage = image;
-          } else {
-            _vehicleImage = image;
+          switch (imageType) {
+            case 'profile':
+              _profileImage = image;
+              break;
+            case 'vehicle':
+              _vehicleImage = image;
+              break;
+            case 'ltfrb':
+              _ltfrbImage = image;
+              break;
           }
         });
       }
@@ -118,6 +134,7 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
       
       String? profileImageUrl;
       String? vehicleImageUrl;
+      String? ltfrbImageUrl;
       
       // Upload images using document service
       if (_profileImage != null) {
@@ -130,6 +147,13 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
       if (_vehicleImage != null) {
         vehicleImageUrl = await _documentService.uploadVehiclePicture(
           _vehicleImage!,
+          user.id,
+        );
+      }
+      
+      if (_ltfrbImage != null) {
+        ltfrbImageUrl = await _documentService.uploadLTFRBPicture(
+          _ltfrbImage!,
           user.id,
         );
       }
@@ -154,6 +178,7 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
         'vehicle_model': _vehicleModelController.text.trim(),
         'profile_picture_url': profileImageUrl,
         'vehicle_picture_url': vehicleImageUrl,
+        'ltfrb_picture_url': ltfrbImageUrl,
         'is_verified': false, // Admin verification required
         'is_online': false,
         'is_available': false,
@@ -348,7 +373,7 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
             // Profile image
             Center(
               child: GestureDetector(
-                onTap: () => _pickImage(true),
+                onTap: () => _pickImage('profile'),
                 child: Container(
                   width: 120,
                   height: 120,
@@ -383,6 +408,52 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
                   color: SwiftDashColors.textGrey,
                   fontSize: 12,
                 ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: SwiftDashColors.lightBlue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: SwiftDashColors.lightBlue.withOpacity(0.3)),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 16,
+                        color: SwiftDashColors.lightBlue,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        'Profile Photo Requirements',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: SwiftDashColors.lightBlue,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    '• Must be a clear passport-style headshot\n'
+                    '• Face should be clearly visible and centered\n'
+                    '• No sunglasses or face coverings\n'
+                    '• Maximum file size: 5MB\n'
+                    '• JPEG or PNG format only',
+                    style: TextStyle(
+                      color: SwiftDashColors.textGrey,
+                      fontSize: 11,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 32),
@@ -486,7 +557,7 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
             // Vehicle image
             Center(
               child: GestureDetector(
-                onTap: () => _pickImage(false),
+                onTap: () => _pickImage('vehicle'),
                 child: Container(
                   width: 200,
                   height: 120,
@@ -526,69 +597,98 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
                 ),
               ),
             ),
-            const SizedBox(height: 32),
-            
-            DropdownButtonFormField<VehicleType>(
-              value: _selectedVehicleType,
-              decoration: InputDecoration(
-                labelText: 'Vehicle Type',
-                border: const OutlineInputBorder(),
-                prefixIcon: const Icon(Icons.local_shipping),
-                suffixIcon: _loadingVehicleTypes 
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : null,
+            const SizedBox(height: 12),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: SwiftDashColors.lightBlue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: SwiftDashColors.lightBlue.withOpacity(0.3)),
               ),
-              items: _loadingVehicleTypes 
-                ? []
-                : _vehicleTypes.map((type) {
-                    return DropdownMenuItem(
-                      value: type,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              type.name,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w500,
-                                fontSize: 16,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Max: ${type.maxWeightKg.toStringAsFixed(0)}kg • Base: ₱${type.basePrice.toStringAsFixed(0)}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: SwiftDashColors.textGrey,
-                              ),
-                            ),
-                          ],
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.directions_car,
+                        size: 16,
+                        color: SwiftDashColors.lightBlue,
+                      ),
+                      SizedBox(width: 8),
+                      Text(
+                        'Vehicle Photo Requirements',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: SwiftDashColors.lightBlue,
+                          fontSize: 12,
                         ),
                       ),
-                    );
-                  }).toList(),
-              hint: _loadingVehicleTypes 
-                ? const Text('Loading vehicle types...')
-                : _vehicleTypes.isEmpty 
-                  ? const Text('No vehicle types available')
-                  : const Text('Select your vehicle type'),
-              onChanged: _loadingVehicleTypes ? null : (value) {
-                setState(() {
-                  _selectedVehicleType = value;
-                });
-              },
-              validator: (value) {
-                if (value == null) {
-                  return 'Please select a vehicle type';
-                }
-                return null;
-              },
+                    ],
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    '• Take photos from SIDE and BACK view\n'
+                    '• Vehicle should be clearly visible\n'
+                    '• License plate must be readable\n'
+                    '• Good lighting and clear image quality\n'
+                    '• Maximum file size: 5MB per photo\n'
+                    '• JPEG or PNG format only',
+                    style: TextStyle(
+                      color: SwiftDashColors.textGrey,
+                      fontSize: 11,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 32),
+            
+            // Readonly picker that opens a bottom sheet (more reliable than Dropdown on some devices)
+            GestureDetector(
+              onTap: _loadingVehicleTypes || _vehicleTypes.isEmpty
+                  ? null
+                  : () async {
+                      final picked = await showModalBottomSheet<VehicleType>(
+                        context: context,
+                        builder: (ctx) => SafeArea(
+                          child: ListView.separated(
+                            shrinkWrap: true,
+                            itemBuilder: (context, i) {
+                              final t = _vehicleTypes[i];
+                              return ListTile(
+                                title: Text(t.name),
+                                subtitle: Text('Max: ${t.maxWeightKg.toStringAsFixed(0)}kg • Base: ${t.basePrice.toStringAsFixed(0)}'),
+                                onTap: () => Navigator.of(ctx).pop(t),
+                              );
+                            },
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemCount: _vehicleTypes.length,
+                          ),
+                        ),
+                      );
+                      if (picked != null) setState(() => _selectedVehicleType = picked);
+                    },
+              child: AbsorbPointer(
+                child: TextFormField(
+                  readOnly: true,
+                  decoration: InputDecoration(
+                    labelText: 'Vehicle Type',
+                    border: const OutlineInputBorder(),
+                    prefixIcon: const Icon(Icons.local_shipping),
+                    suffixIcon: _loadingVehicleTypes
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Icon(Icons.arrow_drop_down),
+                  ),
+                  validator: (_) {
+                    if (_selectedVehicleType == null) return 'Please select a vehicle type';
+                    return null;
+                  },
+                  controller: TextEditingController(text: _selectedVehicleType?.name ?? ''),
+                ),
+              ),
             ),
             
             // Show error and retry button if vehicle types failed to load
@@ -660,6 +760,108 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
                 }
                 return null;
               },
+            ),
+            const SizedBox(height: 16),
+            
+            // LTFRB Document Photo
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                border: Border.all(color: SwiftDashColors.lightBlue.withOpacity(0.3)),
+                borderRadius: BorderRadius.circular(12),
+                color: SwiftDashColors.backgroundGrey,
+              ),
+              child: Column(
+                children: [
+                  GestureDetector(
+                    onTap: () => _pickImage('ltfrb'),
+                    child: Container(
+                      width: 180,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(8),
+                        color: SwiftDashColors.white,
+                        border: Border.all(color: SwiftDashColors.lightBlue, width: 2),
+                      ),
+                      child: _ltfrbImage != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.file(
+                              _ltfrbImage!,
+                              width: 180,
+                              height: 100,
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : const Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.assignment,
+                                size: 30,
+                                color: SwiftDashColors.lightBlue,
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'LTFRB Document',
+                                style: TextStyle(
+                                  color: SwiftDashColors.textGrey,
+                                  fontSize: 10,
+                                ),
+                              ),
+                            ],
+                          ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: SwiftDashColors.warningOrange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: SwiftDashColors.warningOrange.withOpacity(0.3)),
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.assignment,
+                              size: 16,
+                              color: SwiftDashColors.warningOrange,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'LTFRB Document Requirements',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: SwiftDashColors.warningOrange,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          '• Take a clear photo of your LTFRB certificate/permit\n'
+                          '• Document must be valid and not expired\n'
+                          '• All text should be clearly readable\n'
+                          '• No glare or shadows on the document\n'
+                          '• Maximum file size: 5MB\n'
+                          '• JPEG or PNG format only',
+                          style: TextStyle(
+                            color: SwiftDashColors.textGrey,
+                            fontSize: 11,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
             
             if (_selectedVehicleType != null) ...[
@@ -765,6 +967,7 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
                     _buildSummaryRow('Model', _vehicleModelController.text),
                     _buildSummaryRow('Profile Photo', _profileImage != null ? 'Added' : 'Not added'),
                     _buildSummaryRow('Vehicle Photo', _vehicleImage != null ? 'Added' : 'Not added'),
+                    _buildSummaryRow('LTFRB Document', _ltfrbImage != null ? 'Added' : 'Not added'),
                   ],
                 ),
               ),

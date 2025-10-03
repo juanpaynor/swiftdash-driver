@@ -5,9 +5,11 @@ import 'screens/auth_wrapper.dart';
 import 'screens/delivery_debug_screen.dart';
 import 'screens/debug_vehicle_types_screen.dart';
 import 'services/auth_service.dart';
-import 'services/realtime_service.dart';
 import 'models/driver.dart';
 import 'screens/delivery_offers_screen.dart';
+import 'services/optimized_location_service.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'screens/edit_profile_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -162,7 +164,11 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 await authService.signOut();
                 // AuthWrapper will handle navigation automatically
               } else if (value == 'profile') {
-                // TODO: Navigate to profile
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => const EditProfileScreen(),
+                  ),
+                );
               } else if (value == 'debug') {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -185,26 +191,6 @@ class _DriverDashboardState extends State<DriverDashboard> {
                     Icon(Icons.person, color: SwiftDashColors.darkBlue),
                     SizedBox(width: 8),
                     Text('Profile'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem<String>(
-                value: 'debug',
-                child: Row(
-                  children: [
-                    Icon(Icons.bug_report, color: SwiftDashColors.lightBlue),
-                    SizedBox(width: 8),
-                    Text('Debug Delivery'),
-                  ],
-                ),
-              ),
-              const PopupMenuItem<String>(
-                value: 'debug_vehicles',
-                child: Row(
-                  children: [
-                    Icon(Icons.local_shipping, color: SwiftDashColors.lightBlue),
-                    SizedBox(width: 8),
-                    Text('Debug Vehicles'),
                   ],
                 ),
               ),
@@ -434,46 +420,85 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 48,
-                            height: 48,
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [SwiftDashColors.warningOrange, SwiftDashColors.warningOrange.withOpacity(0.8)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
+                  child: InkWell(
+                    onTap: () async {
+                      // Show current position and offer to open in maps
+                      try {
+                        final pos = await OptimizedLocationService().getCurrentPosition();
+                        if (pos == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location not available')));
+                          return;
+                        }
+
+                        final lat = pos.latitude;
+                        final lng = pos.longitude;
+                        showDialog(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Current Location'),
+                            content: Text('Lat: ${lat.toStringAsFixed(6)}, Lng: ${lng.toStringAsFixed(6)}'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(),
+                                child: const Text('Close'),
                               ),
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                            child: const Icon(
-                              Icons.location_on,
-                              color: SwiftDashColors.white,
-                              size: 24,
-                            ),
+                              TextButton(
+                                onPressed: () async {
+                                  final googleUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+                                  if (await canLaunchUrl(googleUri)) {
+                                    await launchUrl(googleUri, mode: LaunchMode.externalApplication);
+                                  }
+                                },
+                                child: const Text('Open in Maps'),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'My Location',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                              color: SwiftDashColors.darkBlue,
+                        );
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to get location: $e')));
+                      }
+                    },
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          children: [
+                            Container(
+                              width: 48,
+                              height: 48,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [SwiftDashColors.warningOrange, SwiftDashColors.warningOrange.withOpacity(0.8)],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              child: const Icon(
+                                Icons.location_on,
+                                color: SwiftDashColors.white,
+                                size: 24,
+                              ),
                             ),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Update location',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: SwiftDashColors.textGrey,
+                            const SizedBox(height: 12),
+                            Text(
+                              'My Location',
+                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: SwiftDashColors.darkBlue,
+                              ),
+                              textAlign: TextAlign.center,
                             ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
+                            const SizedBox(height: 4),
+                            Text(
+                              'Update location',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: SwiftDashColors.textGrey,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),

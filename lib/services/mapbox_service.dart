@@ -48,6 +48,29 @@ class MapboxService {
     }
   }
 
+  /// Get a static map image URL centered between two points with pickup/delivery markers
+  static String getStaticPreviewUrl({
+    required double pickupLat,
+    required double pickupLng,
+    required double deliveryLat,
+    required double deliveryLng,
+    int width = 600,
+    int height = 300,
+    int zoom = 12,
+  }) {
+    // Markers: pickup green, delivery red
+    final pickupMarker = 'pin-s+00cc66($pickupLng,$pickupLat)';
+    final deliveryMarker = 'pin-s+ff3366($deliveryLng,$deliveryLat)';
+
+    final centerLng = (pickupLng + deliveryLng) / 2;
+    final centerLat = (pickupLat + deliveryLat) / 2;
+
+    final markers = '$pickupMarker,$deliveryMarker';
+
+    final url = 'https://api.mapbox.com/styles/v1/mapbox/streets-v11/static/$markers/$centerLng,$centerLat,$zoom/${width}x${height}@2x?access_token=$accessToken';
+    return url;
+  }
+
   /// Calculate estimated earnings based on distance
   static double calculateEarnings(double distanceKm) {
     // Base fare + distance rate (adjust these values as needed)

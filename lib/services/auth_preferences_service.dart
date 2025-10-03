@@ -1,6 +1,5 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../core/supabase_config.dart';
 
 class AuthPreferencesService {
   static const String _rememberMeKey = 'remember_me';

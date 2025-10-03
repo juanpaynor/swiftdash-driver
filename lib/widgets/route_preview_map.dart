@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import '../services/mapbox_service.dart';
 import '../core/supabase_config.dart';
 
@@ -26,8 +25,6 @@ class RoutePreviewMap extends StatefulWidget {
 }
 
 class _RoutePreviewMapState extends State<RoutePreviewMap> {
-  MapboxMap? _mapboxMap;
-
   @override
   Widget build(BuildContext context) {
     // Responsive height calculation
@@ -61,140 +58,34 @@ class _RoutePreviewMapState extends State<RoutePreviewMap> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(12),
-        child: MapWidget(
-          key: ValueKey('${widget.pickupLat}-${widget.pickupLng}-${widget.deliveryLat}-${widget.deliveryLng}'),
-          cameraOptions: CameraOptions(
-            center: Point(
-              coordinates: Position(
-                (widget.pickupLng + widget.deliveryLng) / 2,
-                (widget.pickupLat + widget.deliveryLat) / 2,
-              ),
-            ),
-            zoom: 11.0,
-          ),
-          onMapCreated: (MapboxMap mapboxMap) async {
-            _mapboxMap = mapboxMap;
-            await _setupMap();
-          },
-        ),
+        child: Builder(builder: (context) {
+          final previewUrl = MapboxService.getStaticPreviewUrl(
+            pickupLat: widget.pickupLat,
+            pickupLng: widget.pickupLng,
+            deliveryLat: widget.deliveryLat,
+            deliveryLng: widget.deliveryLng,
+            width: MediaQuery.of(context).size.width ~/ 2,
+            height: (widget.height ?? MediaQuery.of(context).size.height * 0.25).toInt(),
+          );
+
+          return Image.network(
+            previewUrl,
+            fit: BoxFit.cover,
+            loadingBuilder: (context, child, progress) {
+              if (progress == null) return child;
+              return const Center(child: CircularProgressIndicator());
+            },
+            errorBuilder: (context, error, stack) {
+              print('Error loading static map: $error');
+              return Center(child: Text('Map preview unavailable', style: TextStyle(color: SwiftDashColors.textGrey)));
+            },
+          );
+        }),
       ),
     );
   }
 
-  Future<void> _setupMap() async {
-    if (_mapboxMap == null) return;
-
-    try {
-      // Add pickup marker (green)
-      await _addMarker(
-        widget.pickupLat,
-        widget.pickupLng,
-        'pickup',
-        SwiftDashColors.successGreen,
-        'P',
-      );
-
-      // Add delivery marker (red)
-      await _addMarker(
-        widget.deliveryLat,
-        widget.deliveryLng,
-        'delivery',
-        SwiftDashColors.dangerRed,
-        'D',
-      );
-
-      // Add route line if available
-      if (widget.routeData != null) {
-        await _addRouteLine();
-      }
-
-      // Fit bounds to show both markers
-      await _fitBounds();
-    } catch (e) {
-      print('Error setting up map: $e');
-    }
-  }
-
-  Future<void> _addMarker(
-    double lat,
-    double lng,
-    String id,
-    Color color,
-    String text,
-  ) async {
-    try {
-      await _mapboxMap!.annotations.createPointAnnotationManager().then((manager) async {
-        await manager.create(
-          PointAnnotationOptions(
-            geometry: Point(coordinates: Position(lng, lat)),
-            textField: text,
-            textSize: 12.0,
-            textColor: Colors.white.value,
-            iconSize: 1.0,
-            iconColor: color.value,
-          ),
-        );
-      });
-    } catch (e) {
-      print('Error adding marker: $e');
-    }
-  }
-
-  Future<void> _addRouteLine() async {
-    if (widget.routeData?.geometry == null) return;
-
-    try {
-      final coordinates = widget.routeData!.geometry['coordinates'] as List;
-      final lineCoordinates = coordinates
-          .map((coord) => Position(coord[0].toDouble(), coord[1].toDouble()))
-          .toList();
-
-      await _mapboxMap!.annotations.createPolylineAnnotationManager().then((manager) async {
-        await manager.create(
-          PolylineAnnotationOptions(
-            geometry: LineString(coordinates: lineCoordinates),
-            lineColor: SwiftDashColors.lightBlue.value,
-            lineWidth: 3.0,
-          ),
-        );
-      });
-    } catch (e) {
-      print('Error adding route line: $e');
-    }
-  }
-
-  Future<void> _fitBounds() async {
-    try {
-      final bbox = widget.routeData?.bbox;
-      if (bbox != null && bbox.length >= 4) {
-        await _mapboxMap!.flyTo(
-          CameraOptions(
-            center: Point(coordinates: Position(
-              (bbox[0] + bbox[2]) / 2, // center longitude
-              (bbox[1] + bbox[3]) / 2, // center latitude
-            )),
-            zoom: 11.0,
-            padding: MbxEdgeInsets(top: 20, left: 20, bottom: 20, right: 20),
-          ),
-          MapAnimationOptions(duration: 1000),
-        );
-      } else {
-        // Fallback: center between pickup and delivery
-        final centerLng = (widget.pickupLng + widget.deliveryLng) / 2;
-        final centerLat = (widget.pickupLat + widget.deliveryLat) / 2;
-        
-        await _mapboxMap!.flyTo(
-          CameraOptions(
-            center: Point(coordinates: Position(centerLng, centerLat)),
-            zoom: 12.0,
-          ),
-          MapAnimationOptions(duration: 1000),
-        );
-      }
-    } catch (e) {
-      print('Error fitting bounds: $e');
-    }
-  }
+  // interactive Mapbox SDK code removed; we generate static previews via MapboxService
 }
 
 // Simplified route preview for when map fails to load

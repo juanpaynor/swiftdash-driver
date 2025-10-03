@@ -1,5 +1,3 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../core/supabase_config.dart';
 import 'vehicle_type_service.dart';
 
 Future<void> testVehicleTypes() async {
