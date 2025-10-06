@@ -3,9 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../models/delivery.dart';
 import '../core/supabase_config.dart';
-import '../services/realtime_service.dart';
+import '../services/driver_flow_service.dart';
 import '../services/location_service.dart';
-import '../services/optimized_location_service.dart';
 import '../widgets/route_preview_map.dart';
 
 class ActiveDeliveryScreen extends StatefulWidget {
@@ -25,7 +24,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
   
-  final RealtimeService _realtimeService = RealtimeService();
+  final DriverFlowService _driverFlow = DriverFlowService();
   final LocationService _locationService = LocationService.instance;
   
   Delivery? _currentDelivery;
@@ -55,24 +54,10 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
   }
   
   void _startLocationTracking() {
-    _locationService.startLocationTracking(
-      onLocationUpdate: (position) {
-        // Update driver location in database
-        final speedKmH = (position.speed * 3.6).clamp(0.0, 200.0);
-
-        _realtimeService.broadcastLocation(
-          deliveryId: _currentDelivery!.id,
-          latitude: position.latitude,
-          longitude: position.longitude,
-          speedKmH: speedKmH,
-          heading: position.heading,
-          accuracy: position.accuracy,
-        );
-      },
-      onError: (error) {
-        print('Location tracking error: $error');
-      },
-    );
+    // Location tracking is now handled by the DriverFlowService
+    // when delivery is accepted. This method is kept for compatibility
+    // but the actual tracking is managed centrally.
+    print('Location tracking is managed by DriverFlowService');
   }
   
   Future<void> _updateDeliveryStatus(String newStatus) async {
@@ -81,45 +66,35 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
     setState(() => _isUpdatingStatus = true);
     
     try {
-      // Try to include current GPS coordinates when updating status
-      double? lat;
-      double? lng;
-      try {
-        final pos = await OptimizedLocationService().getCurrentPosition();
-        if (pos != null) {
-          lat = pos.latitude;
-          lng = pos.longitude;
-        }
-      } catch (e) {
-        print('⚠️ Could not get current position for status update: $e');
+      DeliveryStatus status;
+      switch (newStatus) {
+        case 'pickup_arrived':
+          status = DeliveryStatus.pickupArrived;
+          break;
+        case 'package_collected':
+          status = DeliveryStatus.packageCollected;
+          break;
+        case 'in_transit':
+          status = DeliveryStatus.inTransit;
+          break;
+        case 'delivered':
+          status = DeliveryStatus.delivered;
+          break;
+        default:
+          throw Exception('Invalid status: $newStatus');
       }
 
-      final success = await _realtimeService.updateDeliveryStatus(
-        _currentDelivery!.id,
-        newStatus,
-        latitude: lat,
-        longitude: lng,
-      );
-      
+      final success = await _driverFlow.updateDeliveryStatus(context, status);
+
       if (success) {
         setState(() {
-          _currentDelivery = _currentDelivery!.copyWith(
-            status: DeliveryStatus.values.firstWhere(
-              (status) => status.toString().split('.').last == newStatus,
-            ),
-          );
+          _currentDelivery = _currentDelivery!.copyWith(status: status);
         });
         
-        HapticFeedback.mediumImpact();
-        
-        // Show success feedback
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Status updated to ${_getStatusDisplayName(newStatus)}'),
-            backgroundColor: SwiftDashColors.successGreen,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        if (status == DeliveryStatus.delivered) {
+          // Navigate back to dashboard after completion
+          Navigator.of(context).popUntil((route) => route.isFirst);
+        }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(

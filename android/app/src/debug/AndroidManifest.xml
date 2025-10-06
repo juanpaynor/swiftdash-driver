@@ -4,4 +4,25 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    
+    <!-- Location permissions for driver app -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    
+    <!-- Network state permission -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    
+    <!-- Camera permission for proof of delivery photos -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    
+    <!-- External storage for photo storage -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    
+    <!-- Phone permission for calling customers -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    
+    <!-- Vibration permission for notifications -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 </manifest>

@@ -3,6 +3,7 @@ import '../core/supabase_config.dart';
 import '../services/auth_service.dart';
 import '../services/vehicle_type_service.dart';
 import '../models/vehicle_type.dart';
+import '../screens/debug_vehicle_types_screen.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -31,6 +32,8 @@ class _SignupScreenState extends State<SignupScreen> {
   
   List<VehicleType> _vehicleTypes = [];
   VehicleType? _selectedVehicleType;
+  bool _isLoadingVehicleTypes = false;
+  String? _vehicleTypesError;
 
   @override
   void initState() {
@@ -52,17 +55,43 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   Future<void> _loadVehicleTypes() async {
+    setState(() {
+      _isLoadingVehicleTypes = true;
+      _vehicleTypesError = null;
+    });
+    
     try {
+      print('Loading vehicle types...');
       final vehicleTypes = await _vehicleTypeService.getActiveVehicleTypes();
+      print('Loaded ${vehicleTypes.length} vehicle types');
+      
       setState(() {
         _vehicleTypes = vehicleTypes;
+        _isLoadingVehicleTypes = false;
       });
+      
+      if (vehicleTypes.isEmpty) {
+        setState(() {
+          _vehicleTypesError = 'No vehicle types available. Please contact support.';
+        });
+      }
     } catch (e) {
+      print('Error loading vehicle types: $e');
+      setState(() {
+        _vehicleTypesError = 'Failed to load vehicle types: $e';
+        _isLoadingVehicleTypes = false;
+      });
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to load vehicle types: $e'),
             backgroundColor: SwiftDashColors.dangerRed,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: SwiftDashColors.white,
+              onPressed: _loadVehicleTypes,
+            ),
           ),
         );
       }
@@ -392,56 +421,169 @@ class _SignupScreenState extends State<SignupScreen> {
                       const SizedBox(height: 16),
                       
                       // Vehicle Type Dropdown
-                      Container(
-                        decoration: BoxDecoration(
-                          color: SwiftDashColors.backgroundGrey,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: SwiftDashColors.lightBlue.withOpacity(0.2),
-                          ),
-                        ),
-                        child: DropdownButtonFormField<VehicleType>(
-                          value: _selectedVehicleType,
-                          decoration: InputDecoration(
-                            labelText: 'Vehicle Type',
-                            prefixIcon: Icon(Icons.directions_car_outlined, color: SwiftDashColors.lightBlue),
-                            border: OutlineInputBorder(
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              color: SwiftDashColors.backgroundGrey,
                               borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none,
-                            ),
-                            filled: true,
-                            fillColor: SwiftDashColors.backgroundGrey,
-                            contentPadding: const EdgeInsets.all(16),
-                          ),
-                          items: _vehicleTypes.map((VehicleType vehicleType) {
-                            return DropdownMenuItem<VehicleType>(
-                              value: vehicleType,
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    vehicleType.name,
-                                    style: const TextStyle(fontWeight: FontWeight.w500),
-                                  ),
-                                  Text(
-                                    'Max: ${vehicleType.formattedMaxWeight} • ${vehicleType.formattedPricePerKm}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: SwiftDashColors.textGrey,
-                                    ),
-                                  ),
-                                ],
+                              border: Border.all(
+                                color: SwiftDashColors.lightBlue.withOpacity(0.2),
                               ),
-                            );
-                          }).toList(),
-                          onChanged: (VehicleType? newValue) {
-                            setState(() {
-                              _selectedVehicleType = newValue;
-                            });
-                          },
-                          isExpanded: true,
-                        ),
+                            ),
+                            child: _isLoadingVehicleTypes
+                                ? Container(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.directions_car_outlined, color: SwiftDashColors.lightBlue),
+                                        const SizedBox(width: 12),
+                                        const Text('Loading vehicle types...'),
+                                        const Spacer(),
+                                        const SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                : _vehicleTypesError != null
+                                    ? Container(
+                                        padding: const EdgeInsets.all(16),
+                                        decoration: BoxDecoration(
+                                          color: SwiftDashColors.dangerRed.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: SwiftDashColors.dangerRed.withOpacity(0.3),
+                                          ),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Icon(Icons.error_outline, color: SwiftDashColors.dangerRed),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(
+                                                    'Failed to load vehicle types',
+                                                    style: TextStyle(
+                                                      color: SwiftDashColors.dangerRed,
+                                                      fontWeight: FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              _vehicleTypesError!,
+                                              style: TextStyle(
+                                                color: SwiftDashColors.dangerRed,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            ElevatedButton.icon(
+                                              onPressed: _loadVehicleTypes,
+                                              icon: const Icon(Icons.refresh, size: 16),
+                                              label: const Text('Retry'),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: SwiftDashColors.dangerRed,
+                                                foregroundColor: SwiftDashColors.white,
+                                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                                    : DropdownButtonFormField<VehicleType>(
+                                        value: _selectedVehicleType,
+                                        decoration: InputDecoration(
+                                          labelText: 'Vehicle Type (Optional)',
+                                          prefixIcon: Icon(Icons.directions_car_outlined, color: SwiftDashColors.lightBlue),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(12),
+                                            borderSide: BorderSide.none,
+                                          ),
+                                          filled: true,
+                                          fillColor: SwiftDashColors.backgroundGrey,
+                                          contentPadding: const EdgeInsets.all(16),
+                                        ),
+                                        items: _vehicleTypes.isEmpty
+                                            ? [
+                                                DropdownMenuItem<VehicleType>(
+                                                  value: null,
+                                                  child: Text(
+                                                    'No vehicle types available',
+                                                    style: TextStyle(
+                                                      color: SwiftDashColors.textGrey,
+                                                      fontStyle: FontStyle.italic,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ]
+                                            : _vehicleTypes.map((VehicleType vehicleType) {
+                                                return DropdownMenuItem<VehicleType>(
+                                                  value: vehicleType,
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    children: [
+                                                      Text(
+                                                        vehicleType.name,
+                                                        style: const TextStyle(fontWeight: FontWeight.w500),
+                                                      ),
+                                                      Text(
+                                                        'Max: ${vehicleType.formattedMaxWeight} • ${vehicleType.formattedPricePerKm}',
+                                                        style: TextStyle(
+                                                          fontSize: 12,
+                                                          color: SwiftDashColors.textGrey,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                );
+                                              }).toList(),
+                                        onChanged: _vehicleTypes.isEmpty
+                                            ? null
+                                            : (VehicleType? newValue) {
+                                                setState(() {
+                                                  _selectedVehicleType = newValue;
+                                                });
+                                              },
+                                        isExpanded: true,
+                                        hint: _vehicleTypes.isEmpty
+                                            ? Text(
+                                                'No vehicle types available',
+                                                style: TextStyle(color: SwiftDashColors.textGrey),
+                                              )
+                                            : Text(
+                                                'Select your vehicle type',
+                                                style: TextStyle(color: SwiftDashColors.textGrey),
+                                              ),
+                                      ),
+                          ),
+                          
+                          // Debug button (only in development)
+                          const SizedBox(height: 8),
+                          TextButton.icon(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (context) => const DebugVehicleTypesScreen(),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.bug_report, size: 16),
+                            label: const Text('Debug Vehicle Types'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: SwiftDashColors.textGrey,
+                            ),
+                          ),
+                        ],
                       ),
                       
                       const SizedBox(height: 16),

@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/delivery.dart';
 import '../services/realtime_service.dart';
 import '../services/auth_service.dart';
-import '../services/optimized_location_service.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../services/driver_flow_service.dart';
 import '../core/supabase_config.dart';
 import '../screens/active_delivery_screen.dart';
 
@@ -17,6 +16,7 @@ class ImprovedDeliveryOffersScreen extends StatefulWidget {
 class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScreen> {
   final RealtimeService _realtimeService = RealtimeService();
   final AuthService _authService = AuthService();
+  final DriverFlowService _driverFlow = DriverFlowService();
   
   List<Delivery> _availableOffers = [];
   List<Delivery> _activeDeliveries = [];
@@ -96,52 +96,32 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
   
   Future<bool> _acceptDeliveryOffer(String deliveryId, String driverId) async {
     try {
-      final success = await _realtimeService.acceptDeliveryOffer(deliveryId, driverId);
-
-      if (success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Delivery accepted! Navigate to pickup location.'),
-            backgroundColor: SwiftDashColors.successGreen,
-          ),
-        );
-
-        // Start adaptive location tracking (background-capable service)
+      // Find the delivery object
+      Delivery? delivery;
+      try {
+        delivery = _availableOffers.firstWhere((d) => d.id == deliveryId);
+      } catch (_) {
         try {
-          if (_driverId != null) {
-            await OptimizedLocationService().startDeliveryTracking(
-              driverId: _driverId!,
-              deliveryId: deliveryId,
-            );
-          }
-        } catch (e) {
-          print('⚠️ Failed to start location tracking: $e');
-        }
-
-        // Prompt to open navigation to pickup
-        Delivery? acceptedDelivery;
-        try {
-          acceptedDelivery = _availableOffers.firstWhere((d) => d.id == deliveryId, orElse: () => _activeDeliveries.firstWhere((d) => d.id == deliveryId));
+          delivery = _activeDeliveries.firstWhere((d) => d.id == deliveryId);
         } catch (_) {
-          acceptedDelivery = null;
+          delivery = null;
         }
+      }
 
-        if (acceptedDelivery != null) {
-          _promptOpenNavigation(acceptedDelivery.pickupLatitude, acceptedDelivery.pickupLongitude);
-        }
-
-        // Refresh data
-        await _loadData();
-        return true;
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Delivery was already taken by another driver.'),
-            backgroundColor: SwiftDashColors.warningOrange,
-          ),
-        );
+      if (delivery == null) {
+        _showError('Delivery not found');
         return false;
       }
+
+      // Use driver flow service for proper accept handling
+      final success = await _driverFlow.acceptDeliveryOffer(context, delivery);
+
+      if (success) {
+        // Refresh data
+        await _loadData();
+      }
+
+      return success;
     } catch (e) {
       _showError('Failed to accept delivery: $e');
       return false;
@@ -169,58 +149,7 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
       );
     }
   }
-  
 
-        Future<void> _promptOpenNavigation(double lat, double lng) async {
-          try {
-            final wazeUri = Uri.parse('waze://?ll=$lat,$lng&navigate=yes');
-            final googleNative = Uri.parse('google.navigation:q=$lat,$lng&mode=d');
-            final googleWeb = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
-
-            final hasWaze = await canLaunchUrl(wazeUri);
-            final hasGoogleNative = await canLaunchUrl(googleNative);
-
-            // Build options based on availability
-            showDialog(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text('Open navigation?'),
-                content: const Text('Would you like to open navigation to the pickup location?'),
-                actions: [
-                  if (hasWaze)
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(ctx).pop();
-                        launchUrl(wazeUri, mode: LaunchMode.externalApplication);
-                      },
-                      child: const Text('Waze'),
-                    ),
-                  if (hasGoogleNative)
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(ctx).pop();
-                        launchUrl(googleNative, mode: LaunchMode.externalApplication);
-                      },
-                      child: const Text('Google Maps'),
-                    ),
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(ctx).pop();
-                      launchUrl(googleWeb, mode: LaunchMode.externalApplication);
-                    },
-                    child: const Text('Open in browser'),
-                  ),
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(),
-                    child: const Text('Cancel'),
-                  ),
-                ],
-              ),
-            );
-          } catch (e) {
-            print('⚠️ Error prompting navigation: $e');
-          }
-        }
   @override
   void dispose() {
     _realtimeService.dispose();

@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/supabase_config.dart';
 import '../services/auth_service.dart';
 import 'login_screen.dart';
-import '../main.dart';
+import 'main_map_screen.dart';
 
 class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
@@ -53,7 +53,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
               
               if (driverSnapshot.data == true) {
                 // User is a verified driver, show main app
-                return const DriverDashboard();
+                return const MainMapScreen();
               } else {
                 // User is not a driver, show error and logout
                 return _buildNotDriverScreen();
@@ -135,7 +135,40 @@ class _AuthWrapperState extends State<AuthWrapper> {
                       ),
                       child: ElevatedButton(
                         onPressed: () async {
-                          await _authService.signOut();
+                          try {
+                            // Show loading indicator
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Signing out...'),
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                            
+                            await _authService.signOut();
+                            
+                            // Show success message
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('✅ Signed out successfully'),
+                                  backgroundColor: Colors.green,
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            // Show error message but still try to navigate
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('⚠️ Sign out error: $e'),
+                                  backgroundColor: Colors.orange,
+                                  duration: const Duration(seconds: 3),
+                                ),
+                              );
+                            }
+                            print('Sign out error: $e');
+                          }
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.transparent,
@@ -149,6 +182,69 @@ class _AuthWrapperState extends State<AuthWrapper> {
                           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             color: SwiftDashColors.white,
                             fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                    
+                    const SizedBox(height: 12),
+                    
+                    // Force Sign Out Button (Emergency)
+                    Container(
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [Colors.grey[600]!, Colors.grey[700]!],
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          try {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Force signing out...'),
+                                duration: Duration(seconds: 1),
+                              ),
+                            );
+                            
+                            await _authService.forceSignOut();
+                            
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('✅ Force sign out successful'),
+                                  backgroundColor: Colors.green,
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('❌ Force sign out failed: $e'),
+                                  backgroundColor: Colors.red,
+                                  duration: const Duration(seconds: 3),
+                                ),
+                              );
+                            }
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          'Force Sign Out',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            color: SwiftDashColors.white,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),

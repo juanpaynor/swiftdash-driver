@@ -223,23 +223,90 @@ class AuthService {
   Future<void> updateOnlineStatus(bool isOnline) async {
     if (!isLoggedIn) return;
     
-    await _supabase
-        .from('driver_profiles')
-        .update({
-          'is_online': isOnline,
-          'updated_at': DateTime.now().toIso8601String(),
-        })
-        .eq('id', currentUser!.id);
+    final driverId = currentUser!.id;
+    
+    try {
+      // First verify this is actually a driver account
+      final isDriver = await _verifyDriverAccount(driverId);
+      if (!isDriver) {
+        throw Exception('Cannot update driver status: Current user is not a driver. Please log in with a driver account.');
+      }
+      
+      // Check if driver profile exists
+      final driverProfile = await _supabase
+          .from('driver_profiles')
+          .select('id')
+          .eq('id', driverId)
+          .maybeSingle();
+      
+      if (driverProfile == null) {
+        throw Exception('Driver profile not found. Please complete driver registration first.');
+      }
+      
+      // Update driver_profiles table
+      await _supabase
+          .from('driver_profiles')
+          .update({
+            'is_online': isOnline,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', driverId);
+      
+      // Also update driver_current_status table for realtime tracking
+      await _supabase.from('driver_current_status').upsert({
+        'driver_id': driverId,
+        'status': isOnline ? 'available' : 'offline',
+        'last_updated': DateTime.now().toIso8601String(),
+      });
+      
+      print('📱 Updated driver online status in both tables: $isOnline');
+    } catch (e) {
+      print('❌ Error updating driver online status: $e');
+      rethrow;
+    }
   }
   
   // Sign out
   Future<void> signOut() async {
-    // Set offline before signing out
-    if (isLoggedIn) {
-      await updateOnlineStatus(false);
+    try {
+      // Only try to set offline status if user is actually a driver
+      if (isLoggedIn) {
+        final isDriver = await _verifyDriverAccount(currentUser!.id);
+        if (isDriver) {
+          try {
+            await updateOnlineStatus(false);
+            print('📱 Driver set to offline before sign out');
+          } catch (e) {
+            print('⚠️ Could not set driver offline (non-critical): $e');
+            // Continue with sign out even if this fails
+          }
+        } else {
+          print('📱 Customer user signing out (no driver status to update)');
+        }
+      }
+      
+      await _supabase.auth.signOut();
+      print('✅ User signed out successfully');
+    } catch (e) {
+      print('❌ Error during sign out: $e');
+      // Force sign out even if there were errors
+      try {
+        await _supabase.auth.signOut();
+      } catch (e2) {
+        print('❌ Force sign out also failed: $e2');
+      }
     }
-    
-    await _supabase.auth.signOut();
+  }
+
+  // Force sign out (emergency method - bypasses all checks)
+  Future<void> forceSignOut() async {
+    try {
+      await _supabase.auth.signOut();
+      print('✅ Force sign out successful');
+    } catch (e) {
+      print('❌ Force sign out failed: $e');
+      rethrow;
+    }
   }
   
   // Reset password

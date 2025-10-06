@@ -1,12 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'core/supabase_config.dart';
+import 'core/mapbox_config.dart';
 import 'screens/auth_wrapper.dart';
 import 'screens/delivery_debug_screen.dart';
 import 'screens/debug_vehicle_types_screen.dart';
 import 'services/auth_service.dart';
+import 'services/driver_flow_service.dart';
 import 'models/driver.dart';
-import 'screens/delivery_offers_screen.dart';
+import 'models/delivery.dart';
+import 'screens/improved_delivery_offers_screen.dart';
 import 'services/optimized_location_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'screens/edit_profile_screen.dart';
@@ -14,10 +18,14 @@ import 'screens/edit_profile_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  // Initialize Supabase
   await Supabase.initialize(
     url: SupabaseConfig.supabaseUrl,
     anonKey: SupabaseConfig.supabaseAnonKey,
   );
+  
+  // Initialize Mapbox
+  MapboxOptions.setAccessToken(MapboxConfig.accessToken);
   
   runApp(const MyApp());
 }
@@ -82,16 +90,19 @@ class _DriverDashboardState extends State<DriverDashboard> {
   bool isOnline = false;
   Driver? currentDriver;
   final AuthService _authService = AuthService();
+  final DriverFlowService _driverFlow = DriverFlowService();
   bool isLoading = true;
+  bool _isUpdatingStatus = false;
 
   @override
   void initState() {
     super.initState();
-    _loadDriverProfile();
+    _initializeDashboard();
   }
 
-  Future<void> _loadDriverProfile() async {
+  Future<void> _initializeDashboard() async {
     try {
+      await _driverFlow.initialize();
       final driver = await _authService.getCurrentDriverProfile();
       setState(() {
         currentDriver = driver;
@@ -107,14 +118,25 @@ class _DriverDashboardState extends State<DriverDashboard> {
   }
 
   Future<void> _toggleOnlineStatus() async {
-    if (currentDriver == null) return;
+    if (currentDriver == null || _isUpdatingStatus) return;
+    
+    setState(() => _isUpdatingStatus = true);
     
     try {
       final newStatus = !isOnline;
-      await _authService.updateOnlineStatus(newStatus);
-      setState(() {
-        isOnline = newStatus;
-      });
+      
+      bool success;
+      if (newStatus) {
+        success = await _driverFlow.goOnline(context);
+      } else {
+        success = await _driverFlow.goOffline(context);
+      }
+      
+      if (success) {
+        setState(() {
+          isOnline = newStatus;
+        });
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -122,6 +144,8 @@ class _DriverDashboardState extends State<DriverDashboard> {
           backgroundColor: SwiftDashColors.dangerRed,
         ),
       );
+    } finally {
+      setState(() => _isUpdatingStatus = false);
     }
   }
 
@@ -360,6 +384,95 @@ class _DriverDashboardState extends State<DriverDashboard> {
             
             const SizedBox(height: 16),
             
+            // Active Delivery Card (if exists)
+            if (_driverFlow.hasActiveDelivery) ...[
+              Card(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [SwiftDashColors.successGreen, SwiftDashColors.successGreen.withOpacity(0.8)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: InkWell(
+                    onTap: () => _driverFlow.navigateToActiveDelivery(context),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: SwiftDashColors.white.withOpacity(0.2),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(
+                                  Icons.local_shipping,
+                                  color: SwiftDashColors.white,
+                                  size: 24,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Active Delivery',
+                                      style: TextStyle(
+                                        color: SwiftDashColors.white,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    Text(
+                                      _driverFlow.activeDelivery?.status.displayName ?? '',
+                                      style: TextStyle(
+                                        color: SwiftDashColors.white.withOpacity(0.9),
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Icon(
+                                Icons.arrow_forward_ios,
+                                color: SwiftDashColors.white,
+                                size: 16,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: SwiftDashColors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              'Tap to view details',
+                              style: TextStyle(
+                                color: SwiftDashColors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            
             // Delivery Actions
             Row(
               children: [
@@ -369,7 +482,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       onTap: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (context) => const DeliveryOffersScreen(),
+                            builder: (context) => const ImprovedDeliveryOffersScreen(),
                           ),
                         );
                       },

@@ -152,11 +152,48 @@ class OptimizedRealtimeService {
       'timestamp': DateTime.now().toIso8601String(),
     };
     
+    // 🔥 BROADCAST VIA WEBSOCKET - This is the key optimization!
+    try {
+      await channel.sendBroadcastMessage(
+        event: 'location_update',
+        payload: locationData,
+      );
+      print('📡 Location broadcasted via websocket for delivery: $deliveryId');
+    } catch (e) {
+      print('❌ Failed to broadcast location: $e');
+    }
+    
     // Emit locally so app components can react immediately
     _locationUpdatesController.add(locationData);
 
     // Optional: Update driver current status table (lightweight)
     await _updateDriverCurrentStatus(latitude, longitude, speedKmH);
+  }
+
+  /// Subscribe to driver location broadcasts (for customers)
+  Future<void> subscribeToDriverLocation(String deliveryId) async {
+    final channelName = 'driver-location-$deliveryId';
+    
+    if (_activeChannels.containsKey(channelName)) {
+      print('📍 Already subscribed to location for delivery: $deliveryId');
+      return;
+    }
+    
+    final channel = _supabase.channel(channelName);
+    
+    // Listen for location broadcasts
+    channel.onBroadcast(
+      event: 'location_update',
+      callback: (payload) {
+        print('📍 Received driver location update: $payload');
+        _locationUpdatesController.add(payload);
+      },
+    );
+    
+    await channel.subscribe();
+    _activeChannels[channelName] = channel;
+    
+    print('📍 Subscribed to driver location broadcasts for delivery: $deliveryId');
   }
 
   /// Store location only for important events (pickup, delivery, etc.)
