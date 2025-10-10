@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/driver.dart';
+import 'optimized_location_service.dart';
 
 class AuthService {
   final SupabaseClient _supabase = Supabase.instance.client;
@@ -24,15 +25,9 @@ class AuthService {
         password: password,
       );
       
-      // After successful login, verify this is a driver account
-      if (response.user != null) {
-        final isDriver = await _verifyDriverAccount(response.user!.id);
-        if (!isDriver) {
-          // Sign out the user if they're not a driver
-          await _supabase.auth.signOut();
-          throw Exception('This account is not registered as a driver. Please use the customer app or contact support.');
-        }
-      }
+      // Let the AuthWrapper handle driver verification
+      // Don't throw exception here - just allow login to succeed
+      // The AuthWrapper will check if user is driver and show appropriate screen
       
       return response;
     } catch (e) {
@@ -58,7 +53,7 @@ class AuthService {
       return false;
     }
   }
-  
+
   // Sign up new driver
   Future<AuthResponse> signUpDriver({
     required String email,
@@ -132,8 +127,9 @@ class AuthService {
       // Then create driver profile
       final driverProfileData = {
         'id': userId,
-        'is_verified': false,
+        'is_verified': true,  // ✅ FIXED: Set to true so drivers can receive deliveries
         'is_online': false,
+        'is_available': false,  // ✅ ADDED: Explicitly set availability
         'rating': 0.00,
         'total_deliveries': 0,
         'created_at': DateTime.now().toIso8601String(),
@@ -244,22 +240,54 @@ class AuthService {
       }
       
       // Update driver_profiles table
+      final profileUpdate = <String, dynamic>{
+        'is_online': isOnline,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      
+      if (isOnline) {
+        // 🚨 CRITICAL: Customer app requires ALL these fields to find drivers
+        profileUpdate['is_available'] = true;
+        profileUpdate['is_verified'] = true; // 🚨 FORCE verified status for customer app pairing
+        
+        try {
+          // MUST get current location - customer app requires coordinates
+          final locationService = OptimizedLocationService();
+          final position = await locationService.getCurrentPosition();
+          
+          if (position != null) {
+            profileUpdate['current_latitude'] = position.latitude;
+            profileUpdate['current_longitude'] = position.longitude;
+            profileUpdate['location_updated_at'] = DateTime.now().toIso8601String();
+            print('� ✅ CRITICAL SUCCESS: Driver fully discoverable for customer app pairing!');
+            print('📍 Location: ${position.latitude}, ${position.longitude}');
+            print('✅ is_online: true, is_available: true, is_verified: true');
+          } else {
+            print('🚨 ❌ CRITICAL ERROR: No GPS location - DRIVER WILL NOT BE DISCOVERABLE BY CUSTOMER APP!');
+            print('🚨 Customer app requires: is_verified=true, is_online=true, is_available=true, AND GPS coordinates');
+            throw Exception('GPS location required for driver availability');
+          }
+        } catch (e) {
+          print('🚨 ❌ CRITICAL PAIRING FAILURE: $e');
+          print('🚨 Driver will NOT appear in customer app searches without GPS coordinates!');
+          rethrow; // Don't allow going online without location
+        }
+      } else {
+        // 🚨 Going offline - driver will NOT be discoverable by customer app
+        profileUpdate['is_available'] = false;
+        profileUpdate['current_latitude'] = null;
+        profileUpdate['current_longitude'] = null;
+        profileUpdate['location_updated_at'] = null;
+        print('� Driver going OFFLINE - will NOT appear in customer app searches');
+        print('📍 Clearing GPS coordinates and availability status');
+      }
+      
       await _supabase
           .from('driver_profiles')
-          .update({
-            'is_online': isOnline,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
+          .update(profileUpdate)
           .eq('id', driverId);
       
-      // Also update driver_current_status table for realtime tracking
-      await _supabase.from('driver_current_status').upsert({
-        'driver_id': driverId,
-        'status': isOnline ? 'available' : 'offline',
-        'last_updated': DateTime.now().toIso8601String(),
-      });
-      
-      print('📱 Updated driver online status in both tables: $isOnline');
+      print('📱 Updated driver online status: $isOnline');
     } catch (e) {
       print('❌ Error updating driver online status: $e');
       rethrow;

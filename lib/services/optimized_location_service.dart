@@ -1,6 +1,7 @@
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
 import 'realtime_service.dart';
+import 'background_location_service.dart';
 
 class OptimizedLocationService {
   static final OptimizedLocationService _instance = OptimizedLocationService._internal();
@@ -29,7 +30,7 @@ class OptimizedLocationService {
       await stopTracking();
     }
 
-  _currentDeliveryId = deliveryId;
+    _currentDeliveryId = deliveryId;
     _isTracking = true;
 
     print('📍 Starting adaptive location tracking for delivery: $deliveryId');
@@ -39,13 +40,19 @@ class OptimizedLocationService {
       throw Exception('Location permissions not granted');
     }
 
-    // Start location stream
+    // Start foreground location stream
     await _startLocationStream();
     
     // Start location broadcast for this delivery
     _realtimeService.startLocationBroadcast(deliveryId);
 
-    print('✅ Adaptive location tracking started');
+    // Start background service for when app is minimized
+    await BackgroundLocationService.startLocationTracking(
+      driverId: driverId,
+      deliveryId: deliveryId,
+    );
+
+    print('✅ Adaptive location tracking started (foreground + background)');
   }
 
   /// Stop location tracking
@@ -60,12 +67,15 @@ class OptimizedLocationService {
     _broadcastTimer?.cancel();
     _broadcastTimer = null;
 
+    // Stop background service
+    await BackgroundLocationService.stopLocationTracking();
+
     _isTracking = false;
-  _currentDeliveryId = null;
+    _currentDeliveryId = null;
     _lastPosition = null;
     _lastBroadcastTime = null;
 
-    print('✅ Location tracking stopped');
+    print('✅ Location tracking stopped (foreground + background)');
   }
 
   /// Check and request location permissions

@@ -1,4 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/cash_remittance.dart';
 
 class DriverEarning {
   final String id;
@@ -11,6 +12,12 @@ class DriverEarning {
   final double totalEarnings;
   final DateTime earningsDate;
   final DateTime createdAt;
+  final PaymentMethod paymentMethod;
+  final double platformCommission;
+  final double driverNetEarnings;
+  final bool isRemittanceRequired;
+  final DateTime? remittanceDeadline;
+  final String? remittanceId;
 
   DriverEarning({
     required this.id,
@@ -23,9 +30,20 @@ class DriverEarning {
     required this.totalEarnings,
     required this.earningsDate,
     required this.createdAt,
+    required this.paymentMethod,
+    required this.platformCommission,
+    required this.driverNetEarnings,
+    required this.isRemittanceRequired,
+    this.remittanceDeadline,
+    this.remittanceId,
   });
 
   factory DriverEarning.fromJson(Map<String, dynamic> json) {
+    final paymentMethod = PaymentMethod.values.firstWhere(
+      (e) => e.toString().split('.').last == (json['payment_method'] ?? 'cash'),
+      orElse: () => PaymentMethod.cash,
+    );
+    
     return DriverEarning(
       id: json['id'] as String,
       driverId: json['driver_id'] as String,
@@ -37,6 +55,13 @@ class DriverEarning {
       totalEarnings: (json['total_earnings'] as num).toDouble(),
       earningsDate: DateTime.parse(json['earnings_date'] as String),
       createdAt: DateTime.parse(json['created_at'] as String),
+      paymentMethod: paymentMethod,
+      platformCommission: (json['platform_commission'] as num?)?.toDouble() ?? 0.0,
+      driverNetEarnings: (json['driver_net_earnings'] as num?)?.toDouble() ?? 0.0,
+      isRemittanceRequired: json['is_remittance_required'] as bool? ?? paymentMethod.requiresRemittance,
+      remittanceDeadline: json['remittance_deadline'] != null 
+          ? DateTime.parse(json['remittance_deadline']) : null,
+      remittanceId: json['remittance_id'],
     );
   }
 
@@ -52,6 +77,12 @@ class DriverEarning {
       'total_earnings': totalEarnings,
       'earnings_date': earningsDate.toIso8601String().split('T')[0],
       'created_at': createdAt.toIso8601String(),
+      'payment_method': paymentMethod.toString().split('.').last,
+      'platform_commission': platformCommission,
+      'driver_net_earnings': driverNetEarnings,
+      'is_remittance_required': isRemittanceRequired,
+      'remittance_deadline': remittanceDeadline?.toIso8601String(),
+      'remittance_id': remittanceId,
     };
   }
 }
@@ -83,14 +114,29 @@ class DriverEarningsService {
   Future<bool> recordDeliveryEarnings({
     required String driverId,
     required String deliveryId,
-    required double baseEarnings,
-    required double distanceEarnings,
+    required double totalPrice,
+    required PaymentMethod paymentMethod,
     double surgeEarnings = 0.0,
     double tips = 0.0,
   }) async {
     try {
-      final totalEarnings = baseEarnings + distanceEarnings + surgeEarnings + tips;
       final today = DateTime.now();
+      
+      // Calculate earnings based on payment method
+      final platformCommissionRate = 0.16; // 16% platform commission
+      final platformCommission = totalPrice * platformCommissionRate;
+      final driverNetEarnings = totalPrice - platformCommission + tips;
+      
+      // For COD, set remittance deadline to 24 hours from now
+      final isRemittanceRequired = paymentMethod.requiresRemittance;
+      final remittanceDeadline = isRemittanceRequired 
+          ? today.add(const Duration(hours: 24))
+          : null;
+      
+      // Split earnings for display purposes
+      final baseEarnings = totalPrice * 0.5; // Base fare
+      final distanceEarnings = totalPrice * 0.5; // Distance fare (simplified)
+      final totalEarnings = baseEarnings + distanceEarnings + surgeEarnings + tips;
       
       await _supabase.from('driver_earnings').insert({
         'driver_id': driverId,
@@ -101,13 +147,66 @@ class DriverEarningsService {
         'tips': tips,
         'total_earnings': totalEarnings,
         'earnings_date': today.toIso8601String().split('T')[0],
+        'payment_method': paymentMethod.toString().split('.').last,
+        'platform_commission': platformCommission,
+        'driver_net_earnings': driverNetEarnings,
+        'is_remittance_required': isRemittanceRequired,
+        'remittance_deadline': remittanceDeadline?.toIso8601String(),
       });
 
-      print('Recorded earnings: ₱$totalEarnings for delivery $deliveryId');
+      // For cash payments, update cash balance
+      if (paymentMethod == PaymentMethod.cash) {
+        await _updateCashBalance(driverId, totalPrice, platformCommission);
+      }
+
+      print('Recorded earnings: ₱$totalEarnings (${paymentMethod.displayName}) for delivery $deliveryId');
+      print('Platform commission: ₱$platformCommission, Driver net: ₱$driverNetEarnings');
+      
       return true;
     } catch (e) {
       print('Error recording delivery earnings: $e');
       return false;
+    }
+  }
+
+  // Update driver's cash balance after COD delivery
+  Future<void> _updateCashBalance(String driverId, double totalAmount, double platformCommission) async {
+    try {
+      // Get current cash balance
+      final balanceResponse = await _supabase
+          .from('driver_cash_balances')
+          .select('*')
+          .eq('driver_id', driverId)
+          .maybeSingle();
+
+      final now = DateTime.now();
+      final nextRemittanceDue = now.add(const Duration(hours: 24));
+
+      if (balanceResponse == null) {
+        // Create new cash balance record
+        await _supabase.from('driver_cash_balances').insert({
+          'driver_id': driverId,
+          'current_balance': totalAmount,
+          'pending_remittance': platformCommission,
+          'last_remittance_date': now.subtract(const Duration(days: 1)).toIso8601String(),
+          'next_remittance_due': nextRemittanceDue.toIso8601String(),
+        });
+      } else {
+        // Update existing balance
+        final currentBalance = (balanceResponse['current_balance'] as num).toDouble();
+        final currentPending = (balanceResponse['pending_remittance'] as num).toDouble();
+        
+        await _supabase.from('driver_cash_balances').update({
+          'current_balance': currentBalance + totalAmount,
+          'pending_remittance': currentPending + platformCommission,
+          'next_remittance_due': nextRemittanceDue.toIso8601String(),
+          'updated_at': now.toIso8601String(),
+        }).eq('driver_id', driverId);
+      }
+      
+      print('Updated cash balance for driver $driverId: +₱$totalAmount (pending remittance: +₱$platformCommission)');
+    } catch (e) {
+      print('Error updating cash balance: $e');
     }
   }
 

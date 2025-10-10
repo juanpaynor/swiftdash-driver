@@ -1,3 +1,5 @@
+import 'cash_remittance.dart';
+
 class Delivery {
   final String id;
   final String customerId;
@@ -44,6 +46,14 @@ class Delivery {
   final String? deliveryNotes;
   final String? signatureData;
   
+  // Payment Information (existing fields in database)
+  final String? paymentBy; // 'sender' or 'recipient'
+  final String? paymentMethod; // 'credit_card', 'maya_wallet', 'qr_ph', 'cash'
+  final String? paymentStatus; // 'pending', 'paid', 'failed', 'cash_pending'
+  final double? deliveryFee;
+  final double? tipAmount;
+  final double? totalAmount;
+  
   const Delivery({
     required this.id,
     required this.customerId,
@@ -77,10 +87,49 @@ class Delivery {
     this.recipientName,
     this.deliveryNotes,
     this.signatureData,
+    this.paymentBy,
+    this.paymentMethod,
+    this.paymentStatus,
+    this.deliveryFee,
+    this.tipAmount,
+    this.totalAmount,
   });
   
   // Calculate driver earnings (you can adjust this percentage)
   double get driverEarnings => totalPrice * 0.75; // 75% to driver, 25% platform fee
+  
+  // Map database payment method to app payment method
+  PaymentMethod get mappedPaymentMethod {
+    switch (paymentMethod) {
+      case 'credit_card':
+      case 'maya_wallet':
+      case 'qr_ph':
+        return PaymentMethod.card;
+      case 'cash':
+        return PaymentMethod.cash;
+      default:
+        return PaymentMethod.cash; // Default fallback
+    }
+  }
+  
+  // Check if this delivery requires cash remittance
+  bool get requiresCashRemittance => mappedPaymentMethod.requiresRemittance;
+  
+  // Get display name for payment method
+  String get paymentMethodDisplayName {
+    switch (paymentMethod) {
+      case 'credit_card':
+        return 'Credit Card';
+      case 'maya_wallet':
+        return 'Maya Wallet';
+      case 'qr_ph':
+        return 'QR Ph';
+      case 'cash':
+        return 'Cash on Delivery';
+      default:
+        return 'Unknown';
+    }
+  }
   
   String get formattedDistance {
     if (distanceKm == null) return 'N/A';
@@ -97,43 +146,99 @@ class Delivery {
     return '${minutes}m';
   }
   
+  static DeliveryStatus _parseDeliveryStatus(String? statusString) {
+    if (statusString == null) return DeliveryStatus.pending;
+    
+    // Handle database field name to enum mapping
+    final statusMap = {
+      'pending': DeliveryStatus.pending,
+      'driver_offered': DeliveryStatus.driverOffered, // Map database field to enum
+      'driverOffered': DeliveryStatus.driverOffered,  // Also handle camelCase
+      'driver_assigned': DeliveryStatus.driverAssigned,
+      'driverAssigned': DeliveryStatus.driverAssigned,
+      'going_to_pickup': DeliveryStatus.goingToPickup, // NEW status
+      'goingToPickup': DeliveryStatus.goingToPickup,   // camelCase version
+      'pickup_arrived': DeliveryStatus.pickupArrived,
+      'pickupArrived': DeliveryStatus.pickupArrived,
+      'at_pickup': DeliveryStatus.pickupArrived,       // Backend uses at_pickup
+      'atPickup': DeliveryStatus.pickupArrived,        // camelCase version
+      'package_collected': DeliveryStatus.packageCollected,
+      'packageCollected': DeliveryStatus.packageCollected,
+      'going_to_destination': DeliveryStatus.goingToDestination, // NEW status
+      'goingToDestination': DeliveryStatus.goingToDestination,   // camelCase version
+      'in_transit': DeliveryStatus.goingToDestination,           // Map old to new
+      'inTransit': DeliveryStatus.goingToDestination,            // camelCase version
+      'at_destination': DeliveryStatus.atDestination,            // NEW status
+      'atDestination': DeliveryStatus.atDestination,             // camelCase version
+      'delivered': DeliveryStatus.delivered,
+      'cancelled': DeliveryStatus.cancelled,
+      'failed': DeliveryStatus.failed,
+    };
+    
+    final mappedStatus = statusMap[statusString];
+    if (mappedStatus != null) {
+      return mappedStatus;
+    }
+    
+    // Fallback to enum name matching
+    try {
+      return DeliveryStatus.values.firstWhere(
+        (e) => e.toString().split('.').last == statusString,
+      );
+    } catch (e) {
+      print('Warning: Unknown delivery status "$statusString", defaulting to pending');
+      return DeliveryStatus.pending;
+    }
+  }
+
   factory Delivery.fromJson(Map<String, dynamic> json) {
-    return Delivery(
+    try {
+      return Delivery(
       id: json['id'],
       customerId: json['customer_id'],
       driverId: json['driver_id'],
       vehicleTypeId: json['vehicle_type_id'],
-      status: DeliveryStatus.values.firstWhere(
-        (e) => e.toString().split('.').last == json['status'],
-      ),
-      createdAt: DateTime.parse(json['created_at']),
+      status: _parseDeliveryStatus(json['status']),
+      createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.parse(json['updated_at']), // fallback to updated_at if created_at is missing
       updatedAt: DateTime.parse(json['updated_at']),
       completedAt: json['completed_at'] != null ? DateTime.parse(json['completed_at']) : null,
-      pickupAddress: json['pickup_address'],
-      pickupLatitude: json['pickup_latitude'].toDouble(),
-      pickupLongitude: json['pickup_longitude'].toDouble(),
-      pickupContactName: json['pickup_contact_name'],
-      pickupContactPhone: json['pickup_contact_phone'],
-      pickupInstructions: json['pickup_instructions'],
-      deliveryAddress: json['delivery_address'],
-      deliveryLatitude: json['delivery_latitude'].toDouble(),
-      deliveryLongitude: json['delivery_longitude'].toDouble(),
-      deliveryContactName: json['delivery_contact_name'],
-      deliveryContactPhone: json['delivery_contact_phone'],
-      deliveryInstructions: json['delivery_instructions'],
-      packageDescription: json['package_description'],
-      packageWeight: json['package_weight']?.toDouble(),
-      packageValue: json['package_value']?.toDouble(),
-      distanceKm: json['distance_km']?.toDouble(),
-      estimatedDuration: json['estimated_duration'],
-      totalPrice: json['total_price'].toDouble(),
-      customerRating: json['customer_rating'],
-      driverRating: json['driver_rating'],
-      proofPhotoUrl: json['proof_photo_url'],
-      recipientName: json['recipient_name'],
-      deliveryNotes: json['delivery_notes'],
-      signatureData: json['signature_data'],
+      pickupAddress: json['pickup_address'] ?? '',
+      pickupLatitude: json['pickup_latitude']?.toDouble() ?? 0.0,
+      pickupLongitude: json['pickup_longitude']?.toDouble() ?? 0.0,
+      pickupContactName: json['pickup_contact_name'] ?? '',
+      pickupContactPhone: json['pickup_contact_phone'] ?? '',
+      pickupInstructions: json['pickup_instructions'] ?? '',
+      deliveryAddress: json['delivery_address'] ?? '',
+      deliveryLatitude: json['delivery_latitude']?.toDouble() ?? 0.0,
+      deliveryLongitude: json['delivery_longitude']?.toDouble() ?? 0.0,
+      deliveryContactName: json['delivery_contact_name'] ?? '',
+      deliveryContactPhone: json['delivery_contact_phone'] ?? '',
+      deliveryInstructions: json['delivery_instructions'] ?? '',
+      packageDescription: json['package_description'] ?? '',
+      packageWeight: json['package_weight']?.toDouble() ?? 0.0,
+      packageValue: json['package_value']?.toDouble() ?? 0.0,
+      distanceKm: json['distance_km']?.toDouble() ?? 0.0,
+      estimatedDuration: json['estimated_duration'] != null ? int.tryParse(json['estimated_duration'].toString()) : null,
+      totalPrice: (json['total_amount'] ?? json['total_price'])?.toDouble() ?? 0.0, // ⚠️ Database uses "total_amount" NOT "total_price"!
+      customerRating: json['customer_rating'] != null ? int.tryParse(json['customer_rating'].toString()) : null,
+      driverRating: json['driver_rating'] != null ? int.tryParse(json['driver_rating'].toString()) : null, 
+      proofPhotoUrl: json['proof_photo_url'] ?? '',
+      recipientName: json['recipient_name'] ?? '',
+      deliveryNotes: json['delivery_notes'] ?? '',
+      signatureData: json['signature_data'] ?? '',
+      paymentBy: json['payment_by'] ?? '',
+      paymentMethod: json['payment_method'] ?? '',
+      paymentStatus: json['payment_status'] ?? 'pending',
+      deliveryFee: json['delivery_fee']?.toDouble() ?? 0.0,
+      tipAmount: json['tip_amount']?.toDouble() ?? 0.0,
+      totalAmount: json['total_amount']?.toDouble() ?? 0.0,
     );
+    } catch (e, stackTrace) {
+      print('❌ Error parsing Delivery JSON: $e');
+      print('📄 JSON payload: $json');
+      print('📍 Stack trace: $stackTrace');
+      rethrow;
+    }
   }
   
   Map<String, dynamic> toJson() {
@@ -170,6 +275,12 @@ class Delivery {
       'recipient_name': recipientName,
       'delivery_notes': deliveryNotes,
       'signature_data': signatureData,
+      'payment_by': paymentBy,
+      'payment_method': paymentMethod,
+      'payment_status': paymentStatus,
+      'delivery_fee': deliveryFee,
+      'tip_amount': tipAmount,
+      'total_amount': totalAmount,
     };
   }
   
@@ -246,14 +357,17 @@ class Delivery {
 }
 
 enum DeliveryStatus {
-  pending,           // Waiting for driver assignment
-  driverAssigned,    // Driver assigned but hasn't arrived at pickup
-  pickupArrived,     // Driver arrived at pickup location
-  packageCollected,  // Driver collected the package
-  inTransit,         // Driver is en route to delivery location
-  delivered,         // Successfully delivered
-  cancelled,         // Cancelled by customer or system
-  failed,            // Delivery failed
+  pending,              // Waiting for driver assignment
+  driverOffered,        // Delivery offered to driver (requires acceptance)
+  driverAssigned,       // Driver assigned (ASSIGNED)
+  goingToPickup,        // Driver navigating to pickup (GOING_TO_PICKUP) - NEW
+  pickupArrived,        // Driver arrived at pickup location (AT_PICKUP)
+  packageCollected,     // Driver collected the package (PICKED_UP)
+  goingToDestination,   // Driver navigating to destination (GOING_TO_DESTINATION) - NEW  
+  atDestination,        // Driver arrived at destination (AT_DESTINATION) - NEW
+  delivered,            // Successfully delivered with POD (DELIVERED)
+  cancelled,            // Cancelled by customer or system
+  failed,               // Delivery failed
 }
 
 extension DeliveryStatusExtension on DeliveryStatus {
@@ -261,14 +375,20 @@ extension DeliveryStatusExtension on DeliveryStatus {
     switch (this) {
       case DeliveryStatus.pending:
         return 'Pending';
+      case DeliveryStatus.driverOffered:
+        return 'Delivery Offered';
       case DeliveryStatus.driverAssigned:
         return 'Driver Assigned';
+      case DeliveryStatus.goingToPickup:
+        return 'Going to Pickup';
       case DeliveryStatus.pickupArrived:
         return 'Arrived at Pickup';
       case DeliveryStatus.packageCollected:
         return 'Package Collected';
-      case DeliveryStatus.inTransit:
-        return 'In Transit';
+      case DeliveryStatus.goingToDestination:
+        return 'Going to Destination';
+      case DeliveryStatus.atDestination:
+        return 'Arrived at Destination';
       case DeliveryStatus.delivered:
         return 'Delivered';
       case DeliveryStatus.cancelled:
@@ -281,15 +401,23 @@ extension DeliveryStatusExtension on DeliveryStatus {
   String get driverActionText {
     switch (this) {
       case DeliveryStatus.pending:
-        return 'Accept Delivery';
+        return 'Wait for Offer';
+      case DeliveryStatus.driverOffered:
+        return 'Accept or Decline';
       case DeliveryStatus.driverAssigned:
+        return 'Start Navigation';
+      case DeliveryStatus.goingToPickup:
         return 'Navigate to Pickup';
       case DeliveryStatus.pickupArrived:
         return 'Confirm Pickup';
       case DeliveryStatus.packageCollected:
-        return 'Navigate to Delivery';
-      case DeliveryStatus.inTransit:
+        return 'Start Delivery';
+      case DeliveryStatus.goingToDestination:
+        return 'Navigate to Destination';
+      case DeliveryStatus.atDestination:
         return 'Complete Delivery';
+      case DeliveryStatus.delivered:
+        return 'Completed';
       default:
         return '';
     }
@@ -299,14 +427,20 @@ extension DeliveryStatusExtension on DeliveryStatus {
     switch (this) {
       case DeliveryStatus.pending:
         return 'Looking for a driver...';
+      case DeliveryStatus.driverOffered:
+        return 'Delivery offer sent to driver';
       case DeliveryStatus.driverAssigned:
+        return 'Driver accepted order';
+      case DeliveryStatus.goingToPickup:
         return 'Driver is on the way to pickup location';
       case DeliveryStatus.pickupArrived:
         return 'Driver has arrived at pickup location';
       case DeliveryStatus.packageCollected:
         return 'Package collected, heading to delivery location';
-      case DeliveryStatus.inTransit:
-        return 'Package is on the way to destination';
+      case DeliveryStatus.goingToDestination:
+        return 'Driver is on the way to destination';
+      case DeliveryStatus.atDestination:
+        return 'Driver has arrived at destination';
       case DeliveryStatus.delivered:
         return 'Package delivered successfully';
       case DeliveryStatus.cancelled:

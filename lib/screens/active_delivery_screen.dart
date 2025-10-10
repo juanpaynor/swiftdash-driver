@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/delivery.dart';
 import '../core/supabase_config.dart';
 import '../services/driver_flow_service.dart';
@@ -75,7 +76,10 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
           status = DeliveryStatus.packageCollected;
           break;
         case 'in_transit':
-          status = DeliveryStatus.inTransit;
+          status = DeliveryStatus.goingToDestination;
+          break;
+        case 'going_to_destination':
+          status = DeliveryStatus.goingToDestination;
           break;
         case 'delivered':
           status = DeliveryStatus.delivered;
@@ -122,12 +126,16 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
     switch (_currentDelivery?.status) {
       case DeliveryStatus.driverAssigned:
         return SwiftDashColors.lightBlue;
+      case DeliveryStatus.goingToPickup:
+        return SwiftDashColors.darkBlue;
       case DeliveryStatus.pickupArrived:
         return SwiftDashColors.warningOrange;
       case DeliveryStatus.packageCollected:
         return SwiftDashColors.lightBlue;
-      case DeliveryStatus.inTransit:
+      case DeliveryStatus.goingToDestination:
         return SwiftDashColors.darkBlue;
+      case DeliveryStatus.atDestination:
+        return SwiftDashColors.warningOrange;
       case DeliveryStatus.delivered:
         return SwiftDashColors.successGreen;
       default:
@@ -138,6 +146,13 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
   Widget _getNextActionButton() {
     switch (_currentDelivery?.status) {
       case DeliveryStatus.driverAssigned:
+        return _buildNavigationButton(
+          'Navigate to Pickup',
+          Icons.navigation,
+          () => _startNavigation(isPickup: true),
+          SwiftDashColors.lightBlue,
+        );
+      case DeliveryStatus.goingToPickup:
         return _buildActionButton(
           'Arrived at Pickup',
           Icons.my_location,
@@ -152,17 +167,24 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
           SwiftDashColors.lightBlue,
         );
       case DeliveryStatus.packageCollected:
-        return _buildActionButton(
-          'Start Delivery',
-          Icons.local_shipping,
-          () => _updateDeliveryStatus('in_transit'),
+        return _buildNavigationButton(
+          'Navigate to Destination',
+          Icons.navigation,
+          () => _startNavigation(isPickup: false),
           SwiftDashColors.darkBlue,
         );
-      case DeliveryStatus.inTransit:
+      case DeliveryStatus.goingToDestination:
         return _buildActionButton(
-          'Mark as Delivered',
-          Icons.check_circle,
-          () => _updateDeliveryStatus('delivered'),
+          'Arrived at Destination',
+          Icons.location_on,
+          () => _updateDeliveryStatus('at_destination'),
+          SwiftDashColors.warningOrange,
+        );
+      case DeliveryStatus.atDestination:
+        return _buildActionButton(
+          'Complete Delivery',
+          Icons.photo_camera,
+          () => _showProofOfDeliveryDialog(),
           SwiftDashColors.successGreen,
         );
       case DeliveryStatus.delivered:
@@ -273,27 +295,200 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
   
   Future<void> _openMaps() async {
     final delivery = _currentDelivery!;
-    String destination;
     
     // Determine destination based on current status
-    if (delivery.status == DeliveryStatus.driverAssigned ||
-        delivery.status == DeliveryStatus.pickupArrived) {
-      destination = '${delivery.pickupLatitude},${delivery.pickupLongitude}';
-    } else {
-      destination = '${delivery.deliveryLatitude},${delivery.deliveryLongitude}';
-    }
+    final bool isPickupPhase = delivery.status == DeliveryStatus.driverAssigned ||
+                               delivery.status == DeliveryStatus.pickupArrived;
     
-    final Uri googleMapsUri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=$destination&travelmode=driving'
+    final double lat = isPickupPhase ? delivery.pickupLatitude : delivery.deliveryLatitude;
+    final double lng = isPickupPhase ? delivery.pickupLongitude : delivery.deliveryLongitude;
+    final String address = isPickupPhase ? delivery.pickupAddress : delivery.deliveryAddress;
+    final String destination = '$lat,$lng';
+    
+    // Show navigation options dialog
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.navigation,
+                  color: SwiftDashColors.darkBlue,
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Navigate to ${isPickupPhase ? "Pickup" : "Delivery"}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: SwiftDashColors.darkBlue,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        address,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: SwiftDashColors.textGrey,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            
+            const SizedBox(height: 20),
+            
+            // Google Maps option
+            _buildNavigationOption(
+              'Google Maps',
+              Icons.map,
+              SwiftDashColors.successGreen,
+              () async {
+                final Uri googleMapsUri = Uri.parse(
+                  'https://www.google.com/maps/dir/?api=1&destination=$destination&travelmode=driving'
+                );
+                await _launchNavigationApp(googleMapsUri, 'Google Maps');
+              },
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Waze option
+            _buildNavigationOption(
+              'Waze',
+              Icons.alt_route,
+              SwiftDashColors.warningOrange,
+              () async {
+                final Uri wazeUri = Uri.parse(
+                  'https://waze.com/ul?ll=$lat,$lng&navigate=yes'
+                );
+                await _launchNavigationApp(wazeUri, 'Waze');
+              },
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Apple Maps option (iOS)
+            _buildNavigationOption(
+              'Apple Maps',
+              Icons.location_on,
+              SwiftDashColors.lightBlue,
+              () async {
+                final Uri appleMapsUri = Uri.parse(
+                  'https://maps.apple.com/?daddr=$lat,$lng&dirflg=d'
+                );
+                await _launchNavigationApp(appleMapsUri, 'Apple Maps');
+              },
+            ),
+            
+            const SizedBox(height: 20),
+            
+            // Cancel button
+            SizedBox(
+              width: double.infinity,
+              child: TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(color: SwiftDashColors.textGrey),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
-    
-    if (await canLaunchUrl(googleMapsUri)) {
-      await launchUrl(googleMapsUri, mode: LaunchMode.externalApplication);
-    } else {
+  }
+  
+  Widget _buildNavigationOption(
+    String name,
+    IconData icon,
+    Color color,
+    VoidCallback onTap,
+  ) {
+    return InkWell(
+      onTap: () {
+        Navigator.pop(context);
+        onTap();
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          border: Border.all(color: color.withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                name,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: SwiftDashColors.darkBlue,
+                ),
+              ),
+            ),
+            Icon(
+              Icons.arrow_forward_ios,
+              color: SwiftDashColors.textGrey,
+              size: 16,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Future<void> _launchNavigationApp(Uri uri, String appName) async {
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        
+        // Show success feedback
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Opening $appName...'),
+            backgroundColor: SwiftDashColors.successGreen,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      } else {
+        throw Exception('Could not launch $appName');
+      }
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not open maps'),
+        SnackBar(
+          content: Text('$appName is not installed on this device'),
           backgroundColor: SwiftDashColors.dangerRed,
+          duration: const Duration(seconds: 3),
         ),
       );
     }
@@ -488,6 +683,31 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
                               ),
                             ],
                           ),
+                          
+                          const SizedBox(height: 16),
+                          
+                          // Navigation button
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              onPressed: _openMaps,
+                              icon: const Icon(Icons.navigation, size: 20),
+                              label: Text(
+                                'Navigate to ${isPickupPhase ? "Pickup" : "Delivery"}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: SwiftDashColors.darkBlue,
+                                foregroundColor: SwiftDashColors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
                         ],
                       ),
                     ),
@@ -607,5 +827,275 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
         ],
       ),
     );
+  }
+
+  // Navigation button widget (different from action button)
+  Widget _buildNavigationButton(
+    String text,
+    IconData icon,
+    VoidCallback onTap,
+    Color color,
+  ) {
+    return GestureDetector(
+      onTap: _isUpdatingStatus ? null : onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.3),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              color: SwiftDashColors.white,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Text(
+              text,
+              style: const TextStyle(
+                color: SwiftDashColors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Start navigation to pickup or destination
+  Future<void> _startNavigation({required bool isPickup}) async {
+    try {
+      final delivery = _currentDelivery!;
+      final lat = isPickup ? delivery.pickupLatitude : delivery.deliveryLatitude;
+      final lng = isPickup ? delivery.pickupLongitude : delivery.deliveryLongitude;
+      final address = isPickup ? delivery.pickupAddress : delivery.deliveryAddress;
+
+      // Show navigation options dialog
+      await showModalBottomSheet(
+        context: context,
+        builder: (context) => Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Navigate to ${isPickup ? "Pickup" : "Destination"}',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                address,
+                style: TextStyle(color: SwiftDashColors.textGrey),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildNavOption(
+                      'Google Maps',
+                      Icons.map,
+                      () => _launchNavigation('google', lat, lng),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildNavOption(
+                      'Waze',
+                      Icons.navigation,
+                      () => _launchNavigation('waze', lat, lng),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+
+      // Update status to indicate navigation started
+      final newStatus = isPickup ? 'going_to_pickup' : 'going_to_destination';
+      await _updateDeliveryStatus(newStatus);
+
+    } catch (e) {
+      print('Error starting navigation: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to start navigation: $e')),
+      );
+    }
+  }
+
+  Widget _buildNavOption(String title, IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: SwiftDashColors.lightBlue,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: SwiftDashColors.white, size: 24),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: const TextStyle(
+                color: SwiftDashColors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _launchNavigation(String app, double lat, double lng) async {
+    try {
+      String url;
+      if (app == 'google') {
+        url = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng';
+      } else {
+        url = 'https://waze.com/ul?ll=$lat,$lng&navigate=yes';
+      }
+
+      final uri = Uri.parse(url);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        Navigator.pop(context); // Close the navigation options modal
+      } else {
+        throw 'Could not launch $app';
+      }
+    } catch (e) {
+      print('Error launching navigation: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open $app')),
+      );
+    }
+  }
+
+  // Show proof of delivery dialog
+  Future<void> _showProofOfDeliveryDialog() async {
+    String recipientName = '';
+    String notes = '';
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Complete Delivery'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Confirm delivery completion:'),
+            const SizedBox(height: 16),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: 'Recipient Name',
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (value) => recipientName = value,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: 'Delivery Notes (Optional)',
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+              onChanged: (value) => notes = value,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _completeDeliveryWithProof(null, recipientName, notes);
+            },
+            child: const Text('Complete Delivery'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Complete delivery with proof of delivery
+  Future<void> _completeDeliveryWithProof(
+    String? photoUrl,
+    String recipientName,
+    String notes,
+  ) async {
+    setState(() => _isUpdatingStatus = true);
+
+    try {
+      final supabase = Supabase.instance.client;
+      
+      // Update delivery with POD data as specified by customer app AI
+      await supabase.from('deliveries').update({
+        'status': 'delivered',
+        'proof_photo_url': photoUrl,
+        'recipient_name': recipientName,
+        'delivery_notes': notes,
+        'completed_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', _currentDelivery!.id);
+
+      // Update local state
+      setState(() {
+        _currentDelivery = _currentDelivery!.copyWith(
+          status: DeliveryStatus.delivered,
+          proofPhotoUrl: photoUrl,
+          recipientName: recipientName,
+          deliveryNotes: notes,
+          completedAt: DateTime.now(),
+        );
+      });
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Delivery completed successfully!'),
+          backgroundColor: SwiftDashColors.successGreen,
+        ),
+      );
+
+      // Navigate back to main screen after a short delay
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+
+    } catch (e) {
+      print('Error completing delivery: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to complete delivery: $e'),
+          backgroundColor: SwiftDashColors.dangerRed,
+        ),
+      );
+    } finally {
+      setState(() => _isUpdatingStatus = false);
+    }
   }
 }

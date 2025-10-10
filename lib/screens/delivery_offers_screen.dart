@@ -219,6 +219,11 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
         }
         return ok;
       },
+      (String deliveryId, String driverId) async {
+        // Decline callback - just close the modal
+        setState(() => _isOfferModalOpen = false);
+        return true;
+      },
       _driverId!,
     );
   }
@@ -657,9 +662,13 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
         statusColor = SwiftDashColors.warningOrange;
         statusText = 'PICKED UP';
         break;
-      case DeliveryStatus.inTransit:
+      case DeliveryStatus.goingToDestination:
         statusColor = SwiftDashColors.warningOrange;
         statusText = 'IN TRANSIT';
+        break;
+      case DeliveryStatus.atDestination:
+        statusColor = SwiftDashColors.darkBlue;
+        statusText = 'AT DESTINATION';
         break;
       default:
         statusColor = SwiftDashColors.textGrey;
@@ -742,7 +751,7 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
                       child: const Text('Start Delivery'),
                     ),
                   ),
-                if (delivery.status == DeliveryStatus.inTransit)
+                if (delivery.status == DeliveryStatus.goingToDestination || delivery.status == DeliveryStatus.atDestination)
                   Expanded(
                     child: ElevatedButton(
                       onPressed: () async {

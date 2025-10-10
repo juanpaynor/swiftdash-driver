@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/supabase_config.dart';
+import '../core/app_assets.dart';
 import '../services/auth_service.dart';
 import 'login_screen.dart';
 import 'main_map_screen.dart';
@@ -92,6 +93,42 @@ class _AuthWrapperState extends State<AuthWrapper> {
                 ),
                 child: Column(
                   children: [
+                    // SwiftDash Logo
+                    Container(
+                      width: 100,
+                      height: 100,
+                      padding: const EdgeInsets.all(12),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: SwiftDashColors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: SwiftDashColors.lightBlue.withOpacity(0.3),
+                          width: 2,
+                        ),
+                      ),
+                      child: Image.asset(
+                        AppAssets.logo,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.local_shipping,
+                              color: SwiftDashColors.white,
+                              size: 30,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                     Container(
                       width: 80,
                       height: 80,

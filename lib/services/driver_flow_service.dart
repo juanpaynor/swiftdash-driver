@@ -5,6 +5,7 @@ import '../models/delivery.dart';
 import '../models/driver.dart';
 import '../services/realtime_service.dart';
 import '../services/optimized_location_service.dart';
+import '../services/background_location_service.dart';
 import '../services/auth_service.dart';
 import '../screens/active_delivery_screen.dart';
 import '../core/supabase_config.dart';
@@ -53,8 +54,10 @@ class DriverFlowService {
         
         // Resume location tracking if delivery is in progress
         if (_activeDelivery!.status == DeliveryStatus.driverAssigned ||
+            _activeDelivery!.status == DeliveryStatus.goingToPickup ||
             _activeDelivery!.status == DeliveryStatus.packageCollected ||
-            _activeDelivery!.status == DeliveryStatus.inTransit) {
+            _activeDelivery!.status == DeliveryStatus.goingToDestination ||
+            _activeDelivery!.status == DeliveryStatus.atDestination) {
           await _startLocationTracking();
         }
       }
@@ -86,21 +89,37 @@ class DriverFlowService {
         return false;
       }
 
-      // Update driver online status in both tables
+      // Update driver online status in both tables (includes location update)
       await _authService.updateOnlineStatus(true);
-      // Reload driver profile to get updated status
+      
+      // Start location tracking for continuous updates (avoid duplicate with auth service)
+      try {
+        // Only start if not already started by auth service
+        final isAlreadyRunning = await BackgroundLocationService.isServiceRunning();
+        if (!isAlreadyRunning) {
+          await _locationService.startDeliveryTracking(
+            driverId: _currentDriver!.id,
+            deliveryId: 'available_${_currentDriver!.id}', // Special ID for availability tracking
+          );
+          print('📍 Started continuous location tracking for driver availability');
+        } else {
+          print('📍 Location tracking already active from auth service');  
+        }
+      } catch (e) {
+        print('⚠️ Could not start continuous location tracking: $e');
+        // Don't fail the online process - initial location is already set in updateOnlineStatus
+      }
+
+      // Reload driver profile to get updated status with location
       _currentDriver = await _authService.getCurrentDriverProfile();
 
-      // Start location tracking for online availability
+      // 🚨 CRITICAL FIX: Initialize realtime subscriptions to receive delivery offers
       try {
-        await _locationService.startDeliveryTracking(
-          driverId: _currentDriver!.id,
-          deliveryId: 'available_${_currentDriver!.id}', // Special ID for availability tracking
-        );
-        print('📍 Started location tracking for driver availability');
+        await _initializeRealtimeSubscriptions();
+        print('🚨 ✅ CRITICAL: Realtime subscriptions initialized - driver can now receive delivery offers!');
       } catch (e) {
-        print('⚠️ Could not start location tracking: $e');
-        // Don't fail the online process if location tracking fails
+        print('🚨 ❌ CRITICAL ERROR: Failed to initialize realtime subscriptions - driver will NOT receive offers: $e');
+        _showError(context, 'Warning: You may not receive delivery offers. Please try going offline and online again.');
       }
 
       _showSuccess(context, 'You are now online and available for deliveries');
@@ -143,7 +162,7 @@ class DriverFlowService {
     }
   }
 
-  /// Accept a delivery offer
+  /// Accept a delivery offer (NEW WORKFLOW)
   Future<bool> acceptDeliveryOffer(BuildContext context, Delivery delivery) async {
     if (_currentDriver == null) return false;
 
@@ -155,8 +174,8 @@ class DriverFlowService {
         return false;
       }
 
-      // Accept the delivery
-      final success = await _realtimeService.acceptDeliveryOffer(delivery.id, _currentDriver!.id);
+      // Accept the delivery offer (NEW WORKFLOW)
+      final success = await _realtimeService.acceptDeliveryOfferNew(delivery.id, _currentDriver!.id);
       
       if (success) {
         _activeDelivery = delivery.copyWith(
@@ -172,11 +191,32 @@ class DriverFlowService {
         
         return true;
       } else {
-        _showError(context, 'Delivery was already taken by another driver');
+        _showError(context, 'Delivery offer expired or was taken by another driver');
         return false;
       }
     } catch (e) {
-      _showError(context, 'Failed to accept delivery: $e');
+      _showError(context, 'Failed to accept delivery offer: $e');
+      return false;
+    }
+  }
+
+  /// Decline a delivery offer (NEW WORKFLOW)
+  Future<bool> declineDeliveryOffer(BuildContext context, Delivery delivery) async {
+    if (_currentDriver == null) return false;
+
+    try {
+      // Decline the delivery offer
+      final success = await _realtimeService.declineDeliveryOfferNew(delivery.id, _currentDriver!.id);
+      
+      if (success) {
+        _showSuccess(context, 'Delivery offer declined. Waiting for next offer...');
+        return true;
+      } else {
+        _showError(context, 'Failed to decline delivery offer - it may have expired');
+        return false;
+      }
+    } catch (e) {
+      _showError(context, 'Failed to decline delivery offer: $e');
       return false;
     }
   }
@@ -274,8 +314,11 @@ class DriverFlowService {
       case DeliveryStatus.packageCollected:
         _showSuccess(context, 'Package collected. Navigate to delivery location.');
         break;
-      case DeliveryStatus.inTransit:
+      case DeliveryStatus.goingToDestination:
         _showSuccess(context, 'En route to delivery location.');
+        break;
+      case DeliveryStatus.atDestination:
+        _showSuccess(context, 'Arrived at destination. Complete the delivery.');
         break;
       case DeliveryStatus.delivered:
         await _handleDeliveryCompletion(context);
@@ -300,12 +343,16 @@ class DriverFlowService {
   bool _isValidStatusTransition(DeliveryStatus current, DeliveryStatus next) {
     switch (current) {
       case DeliveryStatus.driverAssigned:
+        return next == DeliveryStatus.goingToPickup || next == DeliveryStatus.pickupArrived;
+      case DeliveryStatus.goingToPickup:
         return next == DeliveryStatus.pickupArrived;
       case DeliveryStatus.pickupArrived:
         return next == DeliveryStatus.packageCollected;
       case DeliveryStatus.packageCollected:
-        return next == DeliveryStatus.inTransit;
-      case DeliveryStatus.inTransit:
+        return next == DeliveryStatus.goingToDestination;
+      case DeliveryStatus.goingToDestination:
+        return next == DeliveryStatus.atDestination;
+      case DeliveryStatus.atDestination:
         return next == DeliveryStatus.delivered;
       default:
         return false;

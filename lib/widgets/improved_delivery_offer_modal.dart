@@ -91,6 +91,24 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
     return widget.delivery.formattedDuration;
   }
   
+  double _calculateTotalFare() {
+    // Use total_amount if available, otherwise calculate based on distance
+    if (widget.delivery.totalAmount != null && widget.delivery.totalAmount! > 0) {
+      return widget.delivery.totalAmount!;
+    }
+    
+    if (widget.delivery.totalPrice > 0) {
+      return widget.delivery.totalPrice;
+    }
+    
+    // Fallback calculation based on distance (₱50 base + ₱15/km)
+    if (widget.delivery.distanceKm != null) {
+      return 50.0 + (widget.delivery.distanceKm! * 15.0);
+    }
+    
+    return 50.0; // Minimum fare
+  }
+  
   void _onSlideUpdate(double progress) {
     setState(() {
       _slideProgress = progress;
@@ -286,7 +304,7 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text(
-                                '₱${widget.delivery.totalPrice.toStringAsFixed(2)}',
+                                '₱${_calculateTotalFare().toStringAsFixed(2)}',
                                 style: const TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
@@ -298,6 +316,15 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: SwiftDashColors.textGrey,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'You earn: ₱${(_calculateTotalFare() * 0.8).toStringAsFixed(2)}',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: SwiftDashColors.successGreen,
                                 ),
                               ),
                             ],

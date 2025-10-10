@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/delivery.dart';
 import '../services/realtime_service.dart';
 import '../services/auth_service.dart';
@@ -90,6 +91,7 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
       context,
       delivery,
       _acceptDeliveryOffer,
+      _declineDeliveryOffer,
       _driverId!,
     );
   }
@@ -124,6 +126,40 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
       return success;
     } catch (e) {
       _showError('Failed to accept delivery: $e');
+      return false;
+    }
+  }
+
+  Future<bool> _declineDeliveryOffer(String deliveryId, String driverId) async {
+    try {
+      // Find the delivery object
+      Delivery? delivery;
+      try {
+        delivery = _availableOffers.firstWhere((d) => d.id == deliveryId);
+      } catch (_) {
+        try {
+          delivery = _activeDeliveries.firstWhere((d) => d.id == deliveryId);
+        } catch (_) {
+          delivery = null;
+        }
+      }
+
+      if (delivery == null) {
+        _showError('Delivery not found');
+        return false;
+      }
+
+      // Use driver flow service for proper decline handling
+      final success = await _driverFlow.declineDeliveryOffer(context, delivery);
+
+      if (success) {
+        // Refresh data to remove the declined offer
+        await _loadData();
+      }
+
+      return success;
+    } catch (e) {
+      _showError('Failed to decline delivery: $e');
       return false;
     }
   }
@@ -578,6 +614,49 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
+                
+                const SizedBox(height: 16),
+                
+                // Quick navigation button
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _quickNavigate(delivery),
+                        icon: const Icon(Icons.navigation, size: 16),
+                        label: Text(
+                          _getNavigationLabel(delivery),
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: SwiftDashColors.darkBlue,
+                          side: BorderSide(color: SwiftDashColors.darkBlue.withOpacity(0.3)),
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) => ActiveDeliveryScreen(delivery: delivery),
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: SwiftDashColors.darkBlue,
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                        ),
+                        child: const Text(
+                          'View Details',
+                          style: TextStyle(fontSize: 13),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -586,6 +665,50 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
     );
   }
   
+  String _getNavigationLabel(Delivery delivery) {
+    final bool isPickupPhase = delivery.status == DeliveryStatus.driverAssigned ||
+                               delivery.status == DeliveryStatus.pickupArrived;
+    return isPickupPhase ? 'Navigate to Pickup' : 'Navigate to Delivery';
+  }
+  
+  Future<void> _quickNavigate(Delivery delivery) async {
+    final bool isPickupPhase = delivery.status == DeliveryStatus.driverAssigned ||
+                               delivery.status == DeliveryStatus.pickupArrived;
+    
+    final double lat = isPickupPhase ? delivery.pickupLatitude : delivery.deliveryLatitude;
+    final double lng = isPickupPhase ? delivery.pickupLongitude : delivery.deliveryLongitude;
+    final String destination = '$lat,$lng';
+    
+    // Quick launch Google Maps (most common)
+    final Uri googleMapsUri = Uri.parse(
+      'https://www.google.com/maps/dir/?api=1&destination=$destination&travelmode=driving'
+    );
+    
+    try {
+      if (await canLaunchUrl(googleMapsUri)) {
+        await launchUrl(googleMapsUri, mode: LaunchMode.externalApplication);
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Opening Google Maps...'),
+            backgroundColor: SwiftDashColors.successGreen,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        throw Exception('Could not launch Google Maps');
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please install a navigation app (Google Maps, Waze, etc.)'),
+          backgroundColor: SwiftDashColors.dangerRed,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   Color _getStatusColor(DeliveryStatus status) {
     switch (status) {
       case DeliveryStatus.driverAssigned:
@@ -594,8 +717,10 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
         return SwiftDashColors.warningOrange;
       case DeliveryStatus.packageCollected:
         return SwiftDashColors.lightBlue;
-      case DeliveryStatus.inTransit:
+      case DeliveryStatus.goingToDestination:
         return SwiftDashColors.darkBlue;
+      case DeliveryStatus.atDestination:
+        return SwiftDashColors.warningOrange;
       case DeliveryStatus.delivered:
         return SwiftDashColors.successGreen;
       default:

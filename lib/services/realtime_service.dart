@@ -5,6 +5,15 @@ import '../models/delivery.dart';
 import '../widgets/improved_delivery_offer_modal.dart';
 
 class OptimizedRealtimeService {
+  static final OptimizedRealtimeService _instance = OptimizedRealtimeService._internal();
+  factory OptimizedRealtimeService() {
+    print('🔥 RealtimeService singleton instance requested');
+    return _instance;
+  }
+  OptimizedRealtimeService._internal() {
+    print('🔥 RealtimeService singleton instance created');
+  }
+  
   final SupabaseClient _supabase = Supabase.instance.client;
   
   // Channel management
@@ -59,15 +68,15 @@ class OptimizedRealtimeService {
       callback: (payload) => _handleDriverDeliveryUpdate(payload),
     );
     
-    // Listen for new pending deliveries (potential offers)
+    // Listen for delivery offers sent to this driver (using proper status name)
     channel.onPostgresChanges(
-      event: PostgresChangeEvent.insert,
+      event: PostgresChangeEvent.update,
       schema: 'public',
       table: 'deliveries',
       filter: PostgresChangeFilter(
         type: PostgresChangeFilterType.eq,
         column: 'status',
-        value: 'pending',
+        value: 'driver_offered',
       ),
       callback: (payload) => _handleNewDeliveryOffer(payload),
     );
@@ -132,6 +141,7 @@ class OptimizedRealtimeService {
     required double speedKmH,
     double? heading,
     double? accuracy,
+    double? batteryLevel,
   }) async {
     final channelName = 'driver-location-$deliveryId';
     final channel = _activeChannels[channelName];
@@ -148,7 +158,7 @@ class OptimizedRealtimeService {
       'longitude': longitude,
       'speed_kmh': speedKmH,
       'heading': heading,
-      'accuracy': accuracy,
+      'battery_level': batteryLevel ?? 100.0, // Default to 100% if not provided
       'timestamp': DateTime.now().toIso8601String(),
     };
     
@@ -259,15 +269,51 @@ class OptimizedRealtimeService {
   
   void _handleNewDeliveryOffer(PostgresChangePayload payload) {
     try {
+      print('🚨 *** NEW DELIVERY OFFER PAYLOAD RECEIVED ***');
+      print('🚨 Payload event: ${payload.eventType}');
+      print('🚨 Payload new record: ${payload.newRecord}');
+      
       final delivery = Delivery.fromJson(payload.newRecord);
       
-      // Only show offers that are truly pending and not assigned yet
-      if (delivery.status == DeliveryStatus.pending && delivery.driverId == null) {
-        print('💰 New delivery offer available: ${delivery.id}');
+      print('🚨 Parsed delivery: ${delivery.id}');
+      print('🚨 Delivery status: ${delivery.status}');
+      print('🚨 Delivery status enum: ${delivery.status.toString().split('.').last}');
+      print('🚨 Delivery driver ID: ${delivery.driverId}');
+      print('🚨 Current driver ID: $_currentDriverId');
+      
+      // Only show offers that are offered to the current driver
+      if (delivery.status == DeliveryStatus.driverOffered && delivery.driverId == _currentDriverId) {
+        print('💰 ✅ NEW DELIVERY OFFER FOR CURRENT DRIVER: ${delivery.id}');
+        print('💰 Driver ID: ${delivery.driverId} matches current: $_currentDriverId');
         _handleNewOffer(delivery);
+      } else {
+        print('💰 ❌ DELIVERY OFFER NOT FOR CURRENT DRIVER:');
+        print('   - Status: ${delivery.status} (expected: ${DeliveryStatus.driverOffered})');
+        print('   - Status matches: ${delivery.status == DeliveryStatus.driverOffered}');
+        print('   - Driver ID: ${delivery.driverId} (expected: $_currentDriverId)');
+        print('   - Driver ID matches: ${delivery.driverId == _currentDriverId}');
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('❌ Error handling new delivery offer: $e');
+      print('❌ Payload: ${payload.newRecord}');
+      print('❌ Stack trace: $stackTrace');
+      
+      // Try to identify which field is causing the issue
+      if (e.toString().contains('Bad state: No element')) {
+        print('🔍 Debugging individual fields from payload:');
+        final record = payload.newRecord;
+        print('  - id: ${record['id']}');
+        print('  - status: ${record['status']}');
+        print('  - driver_id: ${record['driver_id']}');
+        print('  - customer_id: ${record['customer_id']}');
+        print('  - pickup_address: ${record['pickup_address']}');
+        print('  - delivery_address: ${record['delivery_address']}');
+        print('  - package_description: ${record['package_description']}');
+        print('  - total_price: ${record['total_price']}');
+        print('  - total_amount: ${record['total_amount']}');
+        print('  - created_at: ${record['created_at']}');
+        print('  - updated_at: ${record['updated_at']}');
+      }
     }
   }
   
@@ -292,20 +338,27 @@ class OptimizedRealtimeService {
   
   /// Handle new offer with modal trigger
   void _handleNewOffer(Delivery delivery) {
+    print('🚨 *** _handleNewOffer called for delivery: ${delivery.id} ***');
+    
     // Cancel any existing offer
     if (_currentOffer != null) {
+      print('🔔 Canceling existing offer: ${_currentOffer!.id}');
       _cancelCurrentOffer();
     }
     
     _currentOffer = delivery;
+    
+    print('🚨 *** ADDING DELIVERY TO OFFER MODAL STREAM ***');
     _offerModalController.add(delivery);
+    print('🚨 *** DELIVERY ADDED TO STREAM - LISTENERS SHOULD RECEIVE IT ***');
     
     // Set timeout timer (5 minutes)
     _offerTimeoutTimer = Timer(const Duration(minutes: 5), () {
+      print('⏰ Offer timeout for delivery: ${delivery.id}');
       _cancelCurrentOffer();
     });
     
-    print('🔔 New offer modal triggered for delivery: ${delivery.id}');
+    print('🔔 ✅ New offer modal triggered for delivery: ${delivery.id}');
   }
 
   /// Cancel current offer
@@ -315,77 +368,134 @@ class OptimizedRealtimeService {
     _currentOffer = null;
   }
   
-  /// Accept delivery offer (critical event - immediate DB update)
+  // Guard against concurrent accept attempts
+  static final Set<String> _processingAccepts = <String>{};
+  
+  /// Accept delivery offer (using Edge Function as per customer app AI spec)
   Future<bool> acceptDeliveryOffer(String deliveryId, String driverId) async {
+    // Prevent concurrent accepts for the same delivery
+    if (_processingAccepts.contains(deliveryId)) {
+      print('⚠️ Already processing accept for delivery: $deliveryId');
+      return false;
+    }
+    
+    _processingAccepts.add(deliveryId);
+    
     try {
       print('✅ Accepting delivery offer: $deliveryId');
       
-      // Critical event - immediate database update
-      Map<String, dynamic> payload = {
-        'status': 'driver_assigned',
-        'driver_id': driverId,
-        'assigned_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      };
-
-      try {
-        await _supabase
-            .from('deliveries')
-            .update(payload)
-            .eq('id', deliveryId)
-            .eq('status', 'pending') // Only update if still pending
-            .select()
-            .maybeSingle();
-      } catch (e) {
-        // If the database doesn't have the assigned_at column (older schema), retry without it
-        final errMsg = e.toString();
-        print('⚠️ Accept attempt failed, will retry without assigned_at: $errMsg');
-        if (errMsg.contains("assigned_at") || errMsg.contains("Could not find the 'assigned_at'")) {
-          payload.remove('assigned_at');
-          try {
-            await _supabase
-                .from('deliveries')
-                .update(payload)
-                .eq('id', deliveryId)
-                .eq('status', 'pending')
-                .select()
-                .maybeSingle();
-          } catch (e2) {
-            print('❌ Retry accept without assigned_at also failed: $e2');
-          }
-        } else {
-          // unknown error, rethrow to outer catch
-          rethrow;
-        }
-      }
-
-      // Read back the current delivery row to confirm the result
-      try {
-        final current = await _supabase
-            .from('deliveries')
-            .select('id,driver_id,status')
-            .eq('id', deliveryId)
-            .maybeSingle();
-
-        print('🔎 Post-accept delivery state: $current');
-
-        if (current != null && current['driver_id'] == driverId && (current['status'] == 'driver_assigned' || current['status'] == 'package_collected' || current['status'] == 'in_transit')) {
-          print('✅ Successfully accepted delivery (confirmed by DB): $deliveryId');
+      // Use the dedicated accept_delivery Edge Function as specified by customer app AI
+      final response = await _supabase.functions.invoke(
+        'accept_delivery',
+        body: {
+          'deliveryId': deliveryId,
+          'driverId': driverId,
+          'accept': true,
+        },
+      );
+      
+      if (response.status == 200) {
+        final data = response.data as Map<String, dynamic>;
+        final success = data['ok'] == true;
+        
+        if (success) {
+          print('✅ Delivery accepted successfully: ${data['message']}');
+          
+          // Update driver availability - now busy with delivery
+          await _supabase
+              .from('driver_profiles')
+              .update({'is_available': false})
+              .eq('id', driverId);
+          print('📱 Updated driver availability to false (busy with delivery)');
+          
           _cancelCurrentOffer();
           await subscribeToSpecificDelivery(deliveryId);
           startLocationBroadcast(deliveryId);
+          _processingAccepts.remove(deliveryId);
           return true;
         } else {
-          print('⚠️ Delivery not assigned to this driver (DB shows ${current?['driver_id']} / status ${current?['status']})');
+          print('❌ Failed to accept delivery: ${data['message']}');
+          _processingAccepts.remove(deliveryId);
           return false;
         }
-      } catch (e) {
-        print('❌ Failed to verify delivery after accept attempt: $e');
+      } else {
+        print('❌ Accept delivery API call failed with status: ${response.status}');
+        _processingAccepts.remove(deliveryId);
         return false;
       }
     } catch (e) {
       print('❌ Error accepting delivery offer: $e');
-      return false;
+      
+      // Fallback to direct database update if Edge Function is not available
+      try {
+        print('⚠️ Falling back to direct database update');
+        await _supabase
+            .from('deliveries')
+            .update({
+              'status': 'driver_assigned',
+              'driver_id': driverId,
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', deliveryId)
+            .eq('status', 'driver_offered'); // Match the correct status from customer app AI
+        
+        // Update driver availability - now busy with delivery
+        await _supabase
+            .from('driver_profiles')
+            .update({'is_available': false})
+            .eq('id', driverId);
+        
+        _cancelCurrentOffer();
+        await subscribeToSpecificDelivery(deliveryId);
+        startLocationBroadcast(deliveryId);
+        _processingAccepts.remove(deliveryId);
+        return true;
+      } catch (e2) {
+        print('❌ Fallback database update failed: $e2');
+        return false;
+      }
+    } finally {
+      _processingAccepts.remove(deliveryId);
+    }
+  }
+
+  /// Decline delivery offer (using Edge Function as per customer app AI spec)
+  Future<bool> declineDeliveryOffer(String deliveryId, String driverId) async {
+    try {
+      print('❌ Declining delivery offer: $deliveryId');
+      
+      // Use the dedicated accept_delivery Edge Function with accept: false
+      final response = await _supabase.functions.invoke(
+        'accept_delivery',
+        body: {
+          'deliveryId': deliveryId,
+          'driverId': driverId,
+          'accept': false,
+        },
+      );
+      
+      if (response.status == 200) {
+        final data = response.data as Map<String, dynamic>;
+        final success = data['ok'] == true;
+        
+        if (success) {
+          print('✅ Delivery declined successfully: ${data['message']}');
+          _cancelCurrentOffer();
+          return true;
+        } else {
+          print('❌ Failed to decline delivery: ${data['message']}');
+          return false;
+        }
+      } else {
+        print('❌ Decline delivery API call failed with status: ${response.status}');
+        return false;
+      }
+    } catch (e) {
+      print('❌ Error declining delivery offer: $e');
+      
+      // Fallback - just cancel the current offer locally
+      _cancelCurrentOffer();
+      return true;
     }
   }
   
@@ -512,21 +622,15 @@ class OptimizedRealtimeService {
   /// Update driver online status (critical event)
   Future<void> updateDriverOnlineStatus(String driverId, bool isOnline) async {
     try {
-      // Update in driver profiles (for admin queries)
+      // Update only in driver_profiles table (single source of truth)
       await _supabase
           .from('driver_profiles')
           .update({
             'is_online': isOnline,
+            'is_available': isOnline,  // Available when online, unavailable when offline
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', driverId);
-      
-      // Update in current status table
-      await _supabase.from('driver_current_status').upsert({
-        'driver_id': driverId,
-        'status': isOnline ? 'available' : 'offline',
-        'last_updated': DateTime.now().toIso8601String(),
-      });
       
       print('📱 Updated driver online status: $isOnline');
     } catch (e) {
@@ -578,6 +682,7 @@ class OptimizedRealtimeService {
     BuildContext context,
     Delivery delivery,
     Future<bool> Function(String deliveryId, String driverId) onAccept,
+    Future<bool> Function(String deliveryId, String driverId)? onDecline,
     String driverId,
   ) {
     showDialog(
@@ -595,14 +700,131 @@ class OptimizedRealtimeService {
           }
           return ok;
         },
-        onDecline: () {
-          Navigator.of(context).pop();
+        onDecline: () async {
+          // call parent decline callback if provided
+          if (onDecline != null) {
+            final ok = await onDecline(delivery.id, driverId);
+            print('🚨 Decline delivery result: $ok');
+          }
+          // Always close the modal after decline
+          if (Navigator.of(context).canPop()) Navigator.of(context).pop();
         },
       ),
     );
   }
 
-  // 🔹 8. CLEANUP & DISPOSAL
+  // 🔹 8. NEW OFFER/ACCEPTANCE WORKFLOW
+
+  /// Accept a delivery offer (NEW WORKFLOW)
+  Future<bool> acceptDeliveryOfferNew(String deliveryId, String driverId) async {
+    try {
+      print('🚨 *** ACCEPTING DELIVERY OFFER (NEW WORKFLOW) ***');
+      print('🚨 Delivery ID: $deliveryId');
+      print('🚨 Driver ID: $driverId');
+      
+      // Update delivery status from 'driver_offered' to 'driver_assigned'
+      final result = await _supabase
+          .from('deliveries')
+          .update({
+            'status': 'driver_assigned',
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', deliveryId)
+          .eq('driver_id', driverId)
+          .eq('status', 'driver_offered') // Only update if still offered
+          .select()
+          .maybeSingle()
+          .timeout(
+            const Duration(seconds: 10),
+            onTimeout: () {
+              print('❌ Accept delivery timeout after 10 seconds');
+              throw TimeoutException('Database update timed out', const Duration(seconds: 10));
+            },
+          );
+      
+      if (result != null) {
+        print('🚨 ✅ DELIVERY OFFER ACCEPTED SUCCESSFULLY');
+        
+        // Update driver availability to false (busy with delivery)
+        await _supabase
+            .from('driver_profiles')
+            .update({'is_available': false})
+            .eq('id', driverId)
+            .timeout(
+              const Duration(seconds: 5),
+              onTimeout: () {
+                print('⚠️ Driver availability update timeout (non-critical)');
+                return null;
+              },
+            );
+        print('📱 Updated driver availability to false (busy with delivery)');
+        
+        // Cancel any current offer modal
+        _cancelCurrentOffer();
+        
+        // Subscribe to specific delivery updates
+        await subscribeToSpecificDelivery(deliveryId);
+        
+        // Start location broadcasting for this delivery
+        startLocationBroadcast(deliveryId);
+        
+        return true;
+      } else {
+        print('🚨 ❌ DELIVERY OFFER ACCEPTANCE FAILED - offer may have expired or been taken');
+        return false;
+      }
+    } catch (e) {
+      print('🚨 ❌ ERROR ACCEPTING DELIVERY OFFER: $e');
+      return false;
+    }
+  }
+  
+  /// Decline a delivery offer (NEW WORKFLOW)
+  Future<bool> declineDeliveryOfferNew(String deliveryId, String driverId) async {
+    try {
+      print('🚨 *** DECLINING DELIVERY OFFER (NEW WORKFLOW) ***');
+      print('🚨 Delivery ID: $deliveryId');
+      print('🚨 Driver ID: $driverId');
+      
+      // CRITICAL FIX: Only decline if delivery is still offered to this driver
+      final result = await _supabase
+          .from('deliveries')
+          .update({
+            'status': 'pending',
+            'driver_id': null,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', deliveryId)
+          .eq('driver_id', driverId)
+          .eq('status', 'driver_offered') // Only decline if still offered
+          .select()
+          .maybeSingle()
+          .timeout(
+            const Duration(seconds: 5),
+            onTimeout: () {
+              print('⚠️ Decline delivery timeout - delivery may have already changed');
+              return null;
+            },
+          );
+      
+      if (result != null) {
+        print('🚨 ✅ DELIVERY OFFER DECLINED SUCCESSFULLY - back to pending');
+        
+        // Cancel current offer modal
+        _cancelCurrentOffer();
+        
+        return true;
+      } else {
+        print('🚨 ❌ DELIVERY OFFER DECLINE FAILED - offer may have expired');
+        return false;
+      }
+    } catch (e) {
+      print('🚨 ❌ ERROR DECLINING DELIVERY OFFER: $e');
+      return false;
+    }
+  }
+
+  // 🔹 9. CLEANUP & DISPOSAL
   
   /// Clean up all subscriptions and resources
   Future<void> dispose() async {

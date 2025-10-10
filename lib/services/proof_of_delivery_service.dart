@@ -3,11 +3,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:io';
 import '../core/supabase_config.dart';
 import '../models/delivery.dart';
+import '../models/cash_remittance.dart';
 import 'document_upload_service.dart';
+import 'driver_earnings_service.dart';
 
 class ProofOfDeliveryService {
   final SupabaseClient _supabase = Supabase.instance.client;
   final DocumentUploadService _documentService = DocumentUploadService();
+  final DriverEarningsService _earningsService = DriverEarningsService();
 
   // Capture POD photo
   Future<File?> captureProofPhoto() async {
@@ -40,6 +43,26 @@ class ProofOfDeliveryService {
     String? signatureData,
   }) async {
     try {
+      // First, get the delivery details to extract payment info
+      final deliveryResponse = await _supabase
+          .from('deliveries')
+          .select('total_price, payment_method, tip_amount')
+          .eq('id', deliveryId)
+          .maybeSingle();
+
+      if (deliveryResponse == null) {
+        print('Error: Delivery not found: $deliveryId');
+        return false;
+      }
+
+      // Extract payment information
+      final totalPrice = (deliveryResponse['total_price'] as num).toDouble();
+      final paymentMethodStr = deliveryResponse['payment_method'] as String?;
+      final tipAmount = (deliveryResponse['tip_amount'] as num?)?.toDouble() ?? 0.0;
+
+      // Map payment method to our enum
+      final paymentMethod = _mapPaymentMethod(paymentMethodStr);
+
       final completionData = {
         'status': 'delivered',
         'delivered_at': DateTime.now().toIso8601String(),
@@ -55,16 +78,53 @@ class ProofOfDeliveryService {
         completionData['signature_data'] = signatureData;
       }
 
+      // Update delivery status with POD
       await _supabase
           .from('deliveries')
           .update(completionData)
           .eq('id', deliveryId);
 
-      print('Delivery completed with POD: $deliveryId');
+      // Update driver availability - now available for new deliveries
+      await _supabase
+          .from('driver_profiles')
+          .update({'is_available': true})
+          .eq('id', driverId);
+      print('📱 Updated driver availability to true (delivery completed)');
+
+      // Record earnings with payment method awareness
+      final earningsRecorded = await _earningsService.recordDeliveryEarnings(
+        driverId: driverId,
+        deliveryId: deliveryId,
+        totalPrice: totalPrice,
+        paymentMethod: paymentMethod,
+        tips: tipAmount,
+      );
+
+      if (earningsRecorded) {
+        print('✅ Delivery completed with POD and earnings recorded: $deliveryId');
+        print('💰 Payment Method: ${paymentMethod.displayName}, Total: ₱$totalPrice, Tips: ₱$tipAmount');
+      } else {
+        print('⚠️ Delivery completed with POD but earnings recording failed: $deliveryId');
+      }
+
       return true;
     } catch (e) {
       print('Error completing delivery with POD: $e');
       return false;
+    }
+  }
+
+  // Helper method to map payment method string to enum
+  PaymentMethod _mapPaymentMethod(String? paymentMethod) {
+    switch (paymentMethod) {
+      case 'credit_card':
+      case 'maya_wallet':
+      case 'qr_ph':
+        return PaymentMethod.card;
+      case 'cash':
+        return PaymentMethod.cash;
+      default:
+        return PaymentMethod.cash; // Default fallback
     }
   }
 

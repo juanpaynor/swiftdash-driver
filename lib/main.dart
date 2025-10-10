@@ -4,6 +4,11 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'core/supabase_config.dart';
 import 'core/mapbox_config.dart';
 import 'screens/auth_wrapper.dart';
+import 'screens/login_screen.dart';
+import 'screens/signup_screen.dart';
+import 'screens/main_map_screen.dart';
+import 'screens/active_delivery_screen.dart';
+import 'services/background_location_service.dart';
 import 'screens/delivery_debug_screen.dart';
 import 'screens/debug_vehicle_types_screen.dart';
 import 'services/auth_service.dart';
@@ -14,6 +19,7 @@ import 'screens/improved_delivery_offers_screen.dart';
 import 'services/optimized_location_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'screens/edit_profile_screen.dart';
+import 'widgets/background_service_status_widget.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -26,6 +32,9 @@ void main() async {
   
   // Initialize Mapbox
   MapboxOptions.setAccessToken(MapboxConfig.accessToken);
+  
+  // Initialize background service for location tracking
+  await BackgroundLocationService.initializeService();
   
   runApp(const MyApp());
 }
@@ -74,6 +83,24 @@ class MyApp extends StatelessWidget {
         ),
       ),
       home: const AuthWrapper(),
+      routes: {
+        '/login': (context) => const LoginScreen(),
+        '/signup': (context) => const SignupScreen(),
+        '/dashboard': (context) => const DriverDashboard(),
+        '/map': (context) => const MainMapScreen(),
+      },
+      onGenerateRoute: (settings) {
+        // Handle routes with arguments
+        if (settings.name == '/active-delivery') {
+          final delivery = settings.arguments as Delivery?;
+          if (delivery != null) {
+            return MaterialPageRoute(
+              builder: (context) => ActiveDeliveryScreen(delivery: delivery),
+            );
+          }
+        }
+        return null;
+      },
       debugShowCheckedModeBanner: false,
     );
   }
@@ -377,6 +404,10 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       ),
                       textAlign: TextAlign.center,
                     ),
+                    if (isOnline) ...[
+                      const SizedBox(height: 12),
+                      const BackgroundServiceStatusWidget(),
+                    ],
                   ],
                 ),
               ),

@@ -1,5 +1,5 @@
-name: myapp
-description: "A new Flutter project."
+name: swiftdash_driver
+description: "SwiftDash Driver - Professional delivery driver app"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -43,6 +43,9 @@ dependencies:
   geolocator: ^10.1.0
   permission_handler: ^11.3.1
   url_launcher: ^6.2.1
+  flutter_background_service: ^5.0.5
+  flutter_local_notifications: ^17.2.1
+  device_info_plus: ^10.1.0
 
 dev_dependencies:
   flutter_test:
@@ -54,6 +57,8 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.3.10
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -66,10 +71,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
-  # To add assets to your application, add an assets section, like this:
-  # assets:
-  #   - images/a_dot_burr.jpeg
-  #   - images/a_dot_ham.jpeg
+  # Assets for SwiftDash Driver App
+  assets:
+    - assets/images/
+    - assets/images/logos/
+    - assets/images/icons/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -96,3 +102,23 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# App Icon Configuration
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: false
+  image_path: "assets/images/logos/Swiftdash_Driver.png"
+  adaptive_icon_background: "#1E3A8A" # SwiftDash blue color
+  adaptive_icon_foreground: "assets/images/logos/Swiftdash_Driver.png"
+
+# Splash Screen Configuration (removes default Flutter splash)
+flutter_native_splash:
+  color: "#1E3A8A" # SwiftDash blue background
+  image: "assets/images/logos/Swiftdash_Driver.png"
+  branding: "assets/images/logos/Swiftdash_Driver.png" 
+  color_dark: "#1E3A8A"
+  image_dark: "assets/images/logos/Swiftdash_Driver.png"
+  android_12:
+    image: "assets/images/logos/Swiftdash_Driver.png"
+    color: "#1E3A8A"
+  web: false

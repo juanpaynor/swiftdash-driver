@@ -10,6 +10,7 @@ import '../models/delivery.dart';
 import '../services/driver_flow_service.dart';
 import '../services/optimized_location_service.dart';
 import '../services/realtime_service.dart';
+import '../services/background_location_service.dart';
 import '../core/supabase_config.dart';
 import '../core/mapbox_config.dart';
 import '../widgets/driver_drawer.dart';
@@ -32,6 +33,14 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   bool _isLoading = true;
   geo.Position? _currentPosition;
   MapboxMap? _mapboxMap;
+  
+  // Debouncing for rapid toggles
+  bool _isToggling = false;
+  DateTime? _lastToggleTime;
+  
+  // Keep reference to annotation managers for proper cleanup
+  CircleAnnotationManager? _driverLocationManager;
+  PointAnnotationManager? _pointAnnotationManager;
   
   // Animation controllers
   late AnimationController _onlineToggleController;
@@ -87,21 +96,55 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         return;
       }
       
-      _isOnline = _currentDriver?.isOnline ?? false;
+      // Always start offline for safety - driver must manually go online
+      _isOnline = false;
       
-      // Listen for automatic offer popups (subscriptions initialized by driver flow service)
+      // 🔧 CRITICAL FIX: Clear any stale location markers on app startup
+      await _removeDriverLocationPin();
+      
+      // If driver was online in database, set them offline on app start
+      if (_currentDriver?.isOnline == true) {
+        print('📱 Driver was online in database, setting offline on app start for safety');
+        try {
+          await _driverFlow.goOffline(context);
+          _currentDriver = _driverFlow.currentDriver;
+          
+          // Show user-friendly message
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('🛡️ Set to offline for safety. Tap "Go Online" when ready for deliveries.'),
+                backgroundColor: Colors.orange,
+                duration: Duration(seconds: 4),
+              ),
+            );
+          }
+        } catch (e) {
+          print('⚠️ Failed to set driver offline on startup: $e');
+        }
+      }
+      
+      // 🚨 CRITICAL FIX: Set up offer modal listener with debugging
       if (_currentDriver != null) {
-        // Listen for automatic offer popups
+        print('🔔 Setting up offer modal listener for driver: ${_currentDriver!.id}');
         _realtimeService.offerModalStream.listen((delivery) {
+          print('🔔 *** OFFER MODAL STREAM RECEIVED DELIVERY: ${delivery.id} ***');
+          print('🔔 Driver online status: $_isOnline');
+          print('🔔 Screen mounted: $mounted');
+          
           if (mounted && _isOnline) {
+            print('🔔 ✅ CONDITIONS MET - SHOWING OFFER MODAL');
             _showAutomaticOfferModal(delivery);
+          } else {
+            print('🔔 ❌ CONDITIONS NOT MET - IGNORING OFFER');
+            print('   - Driver online: $_isOnline');
+            print('   - Screen mounted: $mounted');
           }
         });
+        print('✅ Offer modal listener set up successfully');
       }
       
-      if (_isOnline) {
-        _onlineToggleController.forward();
-      }
+      // Animation starts in offline state (no forward() call)
       
       // Add timeout to location getting
       await _getCurrentLocation().timeout(
@@ -163,6 +206,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     // Set navigation night style for optimal driver navigation experience
     _mapboxMap!.loadStyleURI(MapboxConfig.navigationNightStyle);
     
+    // 🔧 CRITICAL FIX: Clear any existing location markers when map is created
+    _removeDriverLocationPin();
+    
     // Move to current location if available, otherwise default to Manila
     if (_currentPosition != null) {
       _mapboxMap!.flyTo(
@@ -193,15 +239,32 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     _onlineToggleController.dispose();
     _pulseController.dispose();
     _realtimeService.dispose();
+    
+    // 🔧 CRITICAL FIX: Clean up map annotations and stop any background services
+    _removeDriverLocationPin();
+    
+    // Also ensure background location service is stopped
+    BackgroundLocationService.stopLocationTracking();
+    
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      key: _scaffoldKey,
-      drawer: const DriverDrawer(),
-      body: Stack(
+    return PopScope(
+      canPop: !_isOnline, // Prevent exit if online
+      onPopInvoked: (didPop) async {
+        if (didPop) return; // Already popped
+        
+        if (_isOnline) {
+          // Show confirmation dialog
+          await _showExitConfirmationDialog();
+        }
+      },
+      child: Scaffold(
+        key: _scaffoldKey,
+        drawer: const DriverDrawer(),
+        body: Stack(
         children: [
           // Mapbox Map with Navigation Night Style
           MapWidget(
@@ -510,10 +573,83 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
             ),
         ],
       ),
+      ), // End of PopScope child (Scaffold)
+    ); // End of PopScope
+  }
+  
+  /// Show exit confirmation dialog when driver tries to exit while online
+  Future<void> _showExitConfirmationDialog() async {
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false, // User must tap button
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.warning, color: Colors.orange, size: 24),
+              const SizedBox(width: 8),
+              const Text('You\'re Still Online'),
+            ],
+          ),
+          content: const Text(
+            'You must go offline before exiting the app. This ensures you won\'t miss delivery notifications and customers know your availability status.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Go Offline & Exit'),
+              onPressed: () async {
+                Navigator.of(context).pop(); // Close dialog
+                
+                // Go offline first
+                final success = await _driverFlow.goOffline(context);
+                if (success) {
+                  setState(() {
+                    _currentDriver = _driverFlow.currentDriver;
+                    _isOnline = _currentDriver?.isOnline ?? false;
+                  });
+                  _onlineToggleController.reverse();
+                  await _removeDriverLocationPin();
+                  
+                  // Now exit the app
+                  if (mounted) {
+                    Navigator.of(context).pop(); // Exit the screen
+                  }
+                }
+              },
+            ),
+          ],
+        );
+      },
     );
   }
   
   void _toggleOnlineStatus() async {
+    // Prevent rapid toggles
+    if (_isToggling) {
+      print('⚠️ Toggle already in progress, ignoring...');
+      return;
+    }
+    
+    // Debounce rapid toggles (minimum 3 seconds between toggles)
+    final now = DateTime.now();
+    if (_lastToggleTime != null && now.difference(_lastToggleTime!) < const Duration(seconds: 3)) {
+      print('⚠️ Debouncing rapid status toggle');
+      return;
+    }
+    
+    _isToggling = true;
+    _lastToggleTime = now;
+    
     try {
       if (_isOnline) {
         final success = await _driverFlow.goOffline(context).timeout(
@@ -558,23 +694,8 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
           _onlineToggleController.forward();
           await _addDriverLocationPin();
           
-          // Start continuous location tracking when going online
-          if (_currentDriver != null) {
-            try {
-              await OptimizedLocationService().startDeliveryTracking(
-                driverId: _currentDriver!.id,
-                deliveryId: 'driver_online_${_currentDriver!.id}', // Unique ID for online tracking
-              ).timeout(
-                const Duration(seconds: 10),
-                onTimeout: () {
-                  print('⚠️ Start location tracking timed out');
-                },
-              );
-              print('📍 Continuous location tracking started');
-            } catch (e) {
-              print('❌ Error starting location tracking: $e');
-            }
-          }
+          // Location tracking is already started by DriverFlowService.goOnline()
+          print('📍 Location tracking handled by DriverFlowService');
           
           // Start location broadcasting for realtime updates
           await _startLocationBroadcasting();
@@ -590,6 +711,8 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
           ),
         );
       }
+    } finally {
+      _isToggling = false;
     }
   }
   
@@ -655,6 +778,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     }
     
     try {
+      // Remove any existing annotations first
+      await _removeDriverLocationPin();
+      
       // Get current location first
       print('🔍 Getting current location for pin...');
       final position = await geo.Geolocator.getCurrentPosition(
@@ -664,8 +790,8 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       _currentPosition = position;
       print('📍 Current position: ${position.latitude}, ${position.longitude}');
       
-      // Create a circle annotation for the driver's location instead of point
-      final circleAnnotationManager = await _mapboxMap!.annotations.createCircleAnnotationManager();
+      // Create a circle annotation manager for the driver's location
+      _driverLocationManager = await _mapboxMap!.annotations.createCircleAnnotationManager();
       
       // Create a blue circle for the driver's location
       final circleAnnotationOptions = CircleAnnotationOptions(
@@ -681,7 +807,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         circleStrokeWidth: 2.0,
       );
       
-      await circleAnnotationManager.create(circleAnnotationOptions);
+      await _driverLocationManager!.create(circleAnnotationOptions);
       print('✅ Driver location circle added successfully');
       
       // Center the map on the driver's location
@@ -716,36 +842,90 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   
   // Remove driver location pin when going offline
   Future<void> _removeDriverLocationPin() async {
-    if (_mapboxMap == null) {
-      print('❌ MapboxMap is null, cannot remove location pin');
-      return;
-    }
-    
     try {
-      // Remove all circle annotations (driver location)
-      final circleAnnotationManager = await _mapboxMap!.annotations.createCircleAnnotationManager();
-      await circleAnnotationManager.deleteAll();
+      // Remove driver location circle if it exists
+      if (_driverLocationManager != null) {
+        await _driverLocationManager!.deleteAll();
+        _driverLocationManager = null;
+        print('✅ Driver location circle removed via manager');
+      }
       
-      // Also remove any point annotations just in case
-      final pointAnnotationManager = await _mapboxMap!.annotations.createPointAnnotationManager();
-      await pointAnnotationManager.deleteAll();
+      // Remove point annotations if they exist
+      if (_pointAnnotationManager != null) {
+        await _pointAnnotationManager!.deleteAll();
+        _pointAnnotationManager = null;
+        print('✅ Point annotations removed via manager');
+      }
       
-      print('✅ Driver location pin removed successfully');
+      // 🔧 CRITICAL FIX: Clear annotation managers even if map isn't ready
+      if (_mapboxMap != null) {
+        // Try to clean up all annotations through the map API
+        try {
+          print('🧹 Cleaning up all map annotations...');
+          // Additional cleanup could be added here if needed
+        } catch (e) {
+          print('⚠️ Error during map annotation cleanup: $e');
+        }
+      }
+      
+      print('✅ Driver location pin cleanup completed');
     } catch (e) {
-      print('❌ Error removing driver location pin: $e');
+      print('❌ Error during location pin cleanup: $e');
+      // Don't throw - cleanup should be fault-tolerant
     }
   }
   
   // Show automatic offer modal when new delivery offers arrive
   void _showAutomaticOfferModal(Delivery delivery) {
-    if (!_isOnline || _currentDriver == null) return;
+    print('🚨 _showAutomaticOfferModal called for delivery: ${delivery.id}');
+    print('🚨 Driver online: $_isOnline');
+    print('🚨 Current driver: ${_currentDriver?.id}');
     
+    if (!_isOnline || _currentDriver == null) {
+      print('❌ Not showing modal - driver offline or null');
+      return;
+    }
+    
+    print('✅ Showing improved offer modal for delivery: ${delivery.id}');
     RealtimeService.showImprovedOfferModal(
       context,
       delivery,
       (deliveryId, driverId) async {
-        // Use driver flow service to accept the offer
-        final success = await _driverFlow.acceptDeliveryOffer(context, delivery);
+        print('🔔 Driver attempting to accept delivery: $deliveryId');
+        try {
+          // CRITICAL FIX: Only update database when user confirms acceptance
+          print('🚨 CRITICAL: Driver confirmed acceptance - updating database');
+          final success = await _realtimeService.acceptDeliveryOffer(deliveryId, driverId);
+          print('🔔 Database update result: $success');
+          
+          if (success) {
+            // Only start location tracking AFTER confirmed database update
+            print('✅ Delivery accepted - starting location tracking');
+            setState(() {
+              _currentDriver = _driverFlow.currentDriver;
+            });
+            
+            // Navigate to active delivery screen with updated delivery object
+            final updatedDelivery = delivery.copyWith(
+              driverId: driverId,
+              status: DeliveryStatus.driverAssigned,
+            );
+            Navigator.pushNamed(context, '/active-delivery', arguments: updatedDelivery);
+          } else {
+            print('❌ Database update failed - delivery may have been taken by another driver');
+          }
+          
+          return success;
+        } catch (e) {
+          print('❌ Error accepting delivery: $e');
+          return false;
+        }
+      },
+      (deliveryId, driverId) async {
+        print('🔔 Driver attempting to decline delivery: $deliveryId');
+        // Use driver flow service to decline the offer
+        final success = await _driverFlow.declineDeliveryOffer(context, delivery);
+        print('🔔 Decline delivery result: $success');
         return success;
       },
       _currentDriver!.id,

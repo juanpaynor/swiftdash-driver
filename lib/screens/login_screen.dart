@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/supabase_config.dart';
+import '../core/app_assets.dart';
 import '../services/auth_service.dart';
 import 'signup_screen.dart';
 import 'database_test_screen.dart';
@@ -157,20 +158,41 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: Column(
                     children: [
                       Container(
-                        width: 80,
-                        height: 80,
+                        width: 120,
+                        height: 120,
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Icon(
-                          Icons.local_shipping,
                           color: SwiftDashColors.white,
-                          size: 40,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: SwiftDashColors.darkBlue.withOpacity(0.1),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Image.asset(
+                          AppAssets.logo,
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) {
+                            // Fallback to icon if image not found
+                            return Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Icon(
+                                Icons.local_shipping,
+                                color: SwiftDashColors.white,
+                                size: 40,
+                              ),
+                            );
+                          },
                         ),
                       ),
                       const SizedBox(height: 16),
