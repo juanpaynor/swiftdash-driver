@@ -20,6 +20,9 @@ import 'services/optimized_location_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'screens/edit_profile_screen.dart';
 import 'widgets/background_service_status_widget.dart';
+import 'services/device_compatibility_service.dart';
+import 'services/navigation_manager.dart';
+import 'services/optimized_state_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,8 +36,35 @@ void main() async {
   // Initialize Mapbox
   MapboxOptions.setAccessToken(MapboxConfig.accessToken);
   
-  // Initialize background service for location tracking
-  await BackgroundLocationService.initializeService();
+  // Initialize state managers
+  try {
+    print('🚀 Initializing state managers...');
+    await DriverStateManager.instance.initialize();
+    print('✅ Driver state manager initialized');
+  } catch (e) {
+    print('⚠️ Driver state manager initialization failed: $e');
+  }
+  
+  // Check device compatibility and initialize background service
+  try {
+    print('🔍 Checking device compatibility...');
+    final deviceCompatibility = DeviceCompatibilityService.instance;
+    final isCompatible = await deviceCompatibility.checkDeviceCompatibility();
+    
+    if (isCompatible) {
+      print('✅ Device is compatible, initializing background service...');
+      await BackgroundLocationService.initializeService();
+      print('✅ Background service initialized successfully');
+    } else {
+      print('⚠️ Device has compatibility issues with background services');
+      print('📱 Device info: ${deviceCompatibility.deviceInfo}');
+      print('🔄 App will use fallback location strategy: ${deviceCompatibility.getFallbackStrategy()}');
+    }
+  } catch (e) {
+    print('❌ Background service initialization failed: $e');
+    print('🔄 App will continue without background service - location tracking will be limited when app is minimized');
+    // App can still run without background service, just location tracking will be limited
+  }
   
   runApp(const MyApp());
 }
@@ -46,6 +76,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: NavigationManager.navigatorKey,
       title: 'SwiftDash Driver',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
@@ -82,7 +113,9 @@ class MyApp extends StatelessWidget {
           margin: EdgeInsets.all(8),
         ),
       ),
-      home: const AuthWrapper(),
+      home: const AppLifecycleManager(
+        child: AuthWrapper(),
+      ),
       routes: {
         '/login': (context) => const LoginScreen(),
         '/signup': (context) => const SignupScreen(),

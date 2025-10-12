@@ -200,6 +200,8 @@ class AuthService {
         'vehicle_type_id': driverResponse['vehicle_type_id'],
         'license_number': driverResponse['license_number'],
         'vehicle_model': driverResponse['vehicle_model'],
+        'plate_number': driverResponse['plate_number'],
+        'profile_picture_url': driverResponse['profile_picture_url'],
         'is_verified': driverResponse['is_verified'],
         'is_online': driverResponse['is_online'],
         'current_latitude': driverResponse['current_latitude'],

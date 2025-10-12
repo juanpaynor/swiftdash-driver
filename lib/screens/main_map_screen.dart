@@ -16,6 +16,9 @@ import '../core/mapbox_config.dart';
 import '../widgets/driver_drawer.dart';
 import '../widgets/driver_status_bottom_sheet.dart';
 import '../widgets/earnings_modal.dart';
+import '../services/navigation_manager.dart';
+import '../services/optimized_state_manager.dart';
+import '../widgets/optimized_state_widgets.dart';
 
 class MainMapScreen extends StatefulWidget {
   const MainMapScreen({super.key});
@@ -69,7 +72,12 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   }
   
   Future<void> _initializeApp() async {
+    final driverState = DriverStateManager.instance;
+    final deliveryState = DeliveryStateManager.instance;
+    
     try {
+      driverState.setLoading(true);
+      
       // Add timeout to prevent hanging
       await _driverFlow.initialize().timeout(
         const Duration(seconds: 15),
@@ -95,9 +103,13 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         });
         return;
       }
+
+      // Update state manager with driver data
+      driverState.updateDriver(_currentDriver!);
       
       // Always start offline for safety - driver must manually go online
       _isOnline = false;
+      driverState.updateOnlineStatus(false);
       
       // 🔧 CRITICAL FIX: Clear any stale location markers on app startup
       await _removeDriverLocationPin();
@@ -108,6 +120,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         try {
           await _driverFlow.goOffline(context);
           _currentDriver = _driverFlow.currentDriver;
+          driverState.updateDriver(_currentDriver!);
           
           // Show user-friendly message
           if (mounted) {
@@ -129,15 +142,18 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         print('🔔 Setting up offer modal listener for driver: ${_currentDriver!.id}');
         _realtimeService.offerModalStream.listen((delivery) {
           print('🔔 *** OFFER MODAL STREAM RECEIVED DELIVERY: ${delivery.id} ***');
-          print('🔔 Driver online status: $_isOnline');
+          print('🔔 Driver online status: ${driverState.isOnline}');
           print('🔔 Screen mounted: $mounted');
           
-          if (mounted && _isOnline) {
+          // Add delivery to available offers
+          deliveryState.addOffer(delivery);
+          
+          if (mounted && driverState.isOnline) {
             print('🔔 ✅ CONDITIONS MET - SHOWING OFFER MODAL');
             _showAutomaticOfferModal(delivery);
           } else {
             print('🔔 ❌ CONDITIONS NOT MET - IGNORING OFFER');
-            print('   - Driver online: $_isOnline');
+            print('   - Driver online: ${driverState.isOnline}');
             print('   - Screen mounted: $mounted');
           }
         });
@@ -156,6 +172,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       );
     } catch (e) {
       print('Error initializing app: $e');
+      driverState.setError('Failed to initialize: $e');
       
       // Show error message
       if (mounted) {
@@ -168,6 +185,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         );
       }
     } finally {
+      driverState.setLoading(false);
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -251,17 +269,17 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: !_isOnline, // Prevent exit if online
-      onPopInvoked: (didPop) async {
-        if (didPop) return; // Already popped
-        
-        if (_isOnline) {
-          // Show confirmation dialog
-          await _showExitConfirmationDialog();
-        }
-      },
-      child: Scaffold(
+    return NavigationWrapper(
+      isMainFlow: true,
+      child: PopScope(
+        canPop: false, // Never allow back button to exit
+        onPopInvoked: (didPop) async {
+          if (didPop) return; // Already handled
+          
+          // Always minimize app instead of exiting
+          await _minimizeApp();
+        },
+        child: Scaffold(
         key: _scaffoldKey,
         drawer: const DriverDrawer(),
         body: Stack(
@@ -309,39 +327,44 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
                     
                     // Online status indicator
                     Expanded(
-                      child: Row(
-                        children: [
-                          AnimatedBuilder(
-                            animation: _pulseController,
-                            builder: (context, child) {
-                              return Container(
-                                width: 12,
-                                height: 12,
-                                decoration: BoxDecoration(
-                                  color: _isOnline ? Colors.green : Colors.red,
-                                  shape: BoxShape.circle,
-                                  boxShadow: _isOnline
-                                      ? [
-                                          BoxShadow(
-                                            color: Colors.green.withOpacity(_pulseController.value * 0.5),
-                                            blurRadius: 8,
-                                            spreadRadius: 2,
-                                          ),
-                                        ]
-                                      : null,
+                      child: ValueListenableContainer<bool>(
+                        notifier: DriverStateManager.instance.isOnlineNotifier,
+                        builder: (context, isOnline, child) {
+                          return Row(
+                            children: [
+                              AnimatedBuilder(
+                                animation: _pulseController,
+                                builder: (context, child) {
+                                  return Container(
+                                    width: 12,
+                                    height: 12,
+                                    decoration: BoxDecoration(
+                                      color: isOnline ? Colors.green : Colors.red,
+                                      shape: BoxShape.circle,
+                                      boxShadow: isOnline
+                                          ? [
+                                              BoxShadow(
+                                                color: Colors.green.withOpacity(_pulseController.value * 0.5),
+                                                blurRadius: 8,
+                                                spreadRadius: 2,
+                                              ),
+                                            ]
+                                          : null,
+                                    ),
+                                  );
+                                },
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                isOnline ? 'Online' : 'Offline',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: isOnline ? Colors.green : Colors.red,
                                 ),
-                              );
-                            },
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            _isOnline ? 'Online' : 'Offline',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: _isOnline ? Colors.green : Colors.red,
-                            ),
-                          ),
-                        ],
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ),
                     
@@ -448,133 +471,170 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
             bottom: 100,
             left: 20,
             right: 20,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: SwiftDashColors.white,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  // Tappable status info area
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: _showDriverStatusBottomSheet,
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              color: _isOnline ? Colors.green.withOpacity(0.2) : Colors.orange.withOpacity(0.2),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              _isOnline ? Icons.check_circle : Icons.pause_circle,
-                              color: _isOnline ? Colors.green : Colors.orange,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _isOnline ? 'You\'re Online' : 'You\'re Offline',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: SwiftDashColors.darkBlue,
-                                  ),
-                                ),
-                                Text(
-                                  _isOnline 
-                                      ? 'Tap for stats • Ready for offers'
-                                      : 'Tap for stats • Go online to receive offers',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
+            child: MultiValueListenable(
+              notifiers: [
+                DriverStateManager.instance.isOnlineNotifier,
+                DriverStateManager.instance.isLoadingNotifier,
+              ],
+              builder: (context) {
+                final driverState = DriverStateManager.instance;
+                return Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: SwiftDashColors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, 2),
                       ),
-                    ),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  // Online/Offline Toggle Button
-                  Container(
-                    height: 40,
-                    child: ElevatedButton(
-                      onPressed: _toggleOnlineStatus,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _isOnline ? Colors.red : SwiftDashColors.lightBlue,
-                        foregroundColor: SwiftDashColors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                  child: Row(
+                    children: [
+                      // Tappable status info area
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: _showDriverStatusBottomSheet,
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  color: driverState.isOnline ? Colors.green.withOpacity(0.2) : Colors.orange.withOpacity(0.2),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  driverState.isOnline ? Icons.check_circle : Icons.pause_circle,
+                                  color: driverState.isOnline ? Colors.green : Colors.orange,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      driverState.isOnline ? 'You\'re Online' : 'You\'re Offline',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        color: SwiftDashColors.darkBlue,
+                                      ),
+                                    ),
+                                    Text(
+                                      driverState.isOnline 
+                                          ? 'Tap for stats • Ready for offers'
+                                          : 'Tap for stats • Go online to receive offers',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        elevation: 2,
                       ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _isOnline ? Icons.pause : Icons.play_arrow,
-                            size: 16,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _isOnline ? 'Go Offline' : 'Go Online',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
+                      const SizedBox(width: 12),
+                      // Online/Offline Toggle Button
+                      Container(
+                        height: 40,
+                        child: ElevatedButton(
+                          onPressed: driverState.isLoading ? null : _toggleOnlineStatus,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: driverState.isOnline ? Colors.red : SwiftDashColors.lightBlue,
+                            foregroundColor: SwiftDashColors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
                             ),
+                            elevation: 2,
                           ),
-                        ],
+                          child: driverState.isLoading
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  ),
+                                )
+                              : Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      driverState.isOnline ? Icons.pause : Icons.play_arrow,
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      driverState.isOnline ? 'Go Offline' : 'Go Online',
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ),
           
-          // Loading overlay
-          if (_isLoading)
-            Container(
-              color: Colors.black.withOpacity(0.5),
-              child: const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(SwiftDashColors.lightBlue),
-                    ),
-                    SizedBox(height: 16),
-                    Text(
-                      'Loading...',
-                      style: TextStyle(
-                        color: SwiftDashColors.white,
-                        fontSize: 16,
+          // Loading overlay with optimized state management
+          ValueListenableContainer<bool>(
+            notifier: DriverStateManager.instance.isLoadingNotifier,
+            builder: (context, isLoading, child) {
+              if (!isLoading && !_isLoading) return const SizedBox.shrink();
+              
+              return Container(
+                color: Colors.black.withOpacity(0.5),
+                child: const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation<Color>(SwiftDashColors.lightBlue),
                       ),
-                    ),
-                  ],
+                      SizedBox(height: 16),
+                      Text(
+                        'Loading...',
+                        style: TextStyle(
+                          color: SwiftDashColors.white,
+                          fontSize: 16,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ),
+              );
+            },
+          ),
         ],
       ),
       ), // End of PopScope child (Scaffold)
-    ); // End of PopScope
+    ), // End of PopScope
+    ); // End of NavigationWrapper
+  }
+
+  /// Minimize app to background instead of exiting
+  Future<void> _minimizeApp() async {
+    try {
+      await SystemNavigator.pop();
+      print('📱 App minimized to background');
+    } catch (e) {
+      print('⚠️ Failed to minimize app: $e');
+      // Fallback: show exit confirmation
+      await _showExitConfirmationDialog();
+    }
   }
   
   /// Show exit confirmation dialog when driver tries to exit while online
@@ -634,8 +694,10 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   }
   
   void _toggleOnlineStatus() async {
-    // Prevent rapid toggles
-    if (_isToggling) {
+    final driverState = DriverStateManager.instance;
+    
+    // Prevent rapid toggles or if already loading
+    if (_isToggling || driverState.isLoading) {
       print('⚠️ Toggle already in progress, ignoring...');
       return;
     }
@@ -651,20 +713,23 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     _lastToggleTime = now;
     
     try {
-      if (_isOnline) {
-        final success = await _driverFlow.goOffline(context).timeout(
-          const Duration(seconds: 10),
-          onTimeout: () {
-            print('⚠️ Go offline operation timed out');
-            return false;
-          },
-        );
+      final success = await driverState.toggleOnlineStatus(context);
+      
+      if (success) {
+        // Update local state from state manager
+        _currentDriver = driverState.driver;
+        _isOnline = driverState.isOnline;
         
-        if (success) {
-          setState(() {
-            _currentDriver = _driverFlow.currentDriver;
-            _isOnline = _currentDriver?.isOnline ?? false;
-          });
+        if (_isOnline) {
+          _onlineToggleController.forward();
+          await _addDriverLocationPin();
+          
+          // Location tracking is already started by DriverFlowService.goOnline()
+          print('📍 Location tracking handled by DriverFlowService');
+          
+          // Start location broadcasting for realtime updates
+          await _startLocationBroadcasting();
+        } else {
           _onlineToggleController.reverse();
           await _removeDriverLocationPin();
           
@@ -676,29 +741,6 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
             },
           );
           print('📍 Location tracking stopped');
-        }
-      } else {
-        final success = await _driverFlow.goOnline(context).timeout(
-          const Duration(seconds: 15),
-          onTimeout: () {
-            print('⚠️ Go online operation timed out');
-            return false;
-          },
-        );
-        
-        if (success) {
-          setState(() {
-            _currentDriver = _driverFlow.currentDriver;
-            _isOnline = _currentDriver?.isOnline ?? false;
-          });
-          _onlineToggleController.forward();
-          await _addDriverLocationPin();
-          
-          // Location tracking is already started by DriverFlowService.goOnline()
-          print('📍 Location tracking handled by DriverFlowService');
-          
-          // Start location broadcasting for realtime updates
-          await _startLocationBroadcasting();
         }
       }
     } catch (e) {

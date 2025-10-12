@@ -64,7 +64,8 @@ class _RoutePreviewMapState extends State<RoutePreviewMap> {
             pickupLng: widget.pickupLng,
             deliveryLat: widget.deliveryLat,
             deliveryLng: widget.deliveryLng,
-            width: MediaQuery.of(context).size.width ~/ 2,
+            routeData: widget.routeData, // Pass route data for polyline
+            width: MediaQuery.of(context).size.width.toInt(),
             height: (widget.height ?? MediaQuery.of(context).size.height * 0.25).toInt(),
           );
 

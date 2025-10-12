@@ -38,6 +38,7 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
   
   // Vehicle info
   final _vehicleModelController = TextEditingController();
+  final _plateNumberController = TextEditingController();
   VehicleType? _selectedVehicleType;
   List<VehicleType> _vehicleTypes = [];
   bool _loadingVehicleTypes = false;
@@ -61,6 +62,7 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
     _licenseNumberController.dispose();
     _ltfrbNumberController.dispose();
     _vehicleModelController.dispose();
+    _plateNumberController.dispose();
     _pageController.dispose();
     super.dispose();
   }
@@ -176,6 +178,7 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
         'license_number': _licenseNumberController.text.trim(),
         'ltfrb_number': _ltfrbNumberController.text.trim(),
         'vehicle_model': _vehicleModelController.text.trim(),
+        'plate_number': _plateNumberController.text.trim(),
         'profile_picture_url': profileImageUrl,
         'vehicle_picture_url': vehicleImageUrl,
         'ltfrb_picture_url': ltfrbImageUrl,
@@ -747,6 +750,28 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
             const SizedBox(height: 16),
             
             TextFormField(
+              controller: _plateNumberController,
+              decoration: const InputDecoration(
+                labelText: 'License Plate Number',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.confirmation_number),
+                hintText: 'e.g., ABC-1234',
+              ),
+              validator: (value) {
+                if (value?.isEmpty ?? true) {
+                  return 'License plate number is required';
+                }
+                // Basic validation for Philippine license plate format
+                final plateRegex = RegExp(r'^[A-Z]{2,3}[-\s]?\d{3,4}$');
+                if (!plateRegex.hasMatch(value!.toUpperCase().replaceAll(' ', '-'))) {
+                  return 'Please enter a valid license plate format (e.g., ABC-1234)';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 16),
+            
+            TextFormField(
               controller: _ltfrbNumberController,
               decoration: const InputDecoration(
                 labelText: 'LTFRB Number',
@@ -965,6 +990,7 @@ class _DriverRegistrationWizardState extends State<DriverRegistrationWizard> {
                     const SizedBox(height: 12),
                     _buildSummaryRow('Type', _selectedVehicleType?.name ?? 'Not selected'),
                     _buildSummaryRow('Model', _vehicleModelController.text),
+                    _buildSummaryRow('Plate Number', _plateNumberController.text),
                     _buildSummaryRow('Profile Photo', _profileImage != null ? 'Added' : 'Not added'),
                     _buildSummaryRow('Vehicle Photo', _vehicleImage != null ? 'Added' : 'Not added'),
                     _buildSummaryRow('LTFRB Document', _ltfrbImage != null ? 'Added' : 'Not added'),

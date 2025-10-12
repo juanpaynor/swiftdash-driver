@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../core/supabase_config.dart';
 import '../core/app_assets.dart';
 import '../services/auth_service.dart';
+import '../services/optimized_state_manager.dart';
+import '../widgets/optimized_state_widgets.dart';
 import 'signup_screen.dart';
 import 'database_test_screen.dart';
 import 'database_diagnostics_screen.dart';
@@ -18,9 +20,14 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _authService = AuthService();
-  
-  bool _isLoading = false;
-  bool _obscurePassword = true;
+  final FormStateManager _formStateManager = FormStateManager.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    // Reset form state when screen is initialized
+    _formStateManager.reset();
+  }
 
   @override
   void dispose() {
@@ -32,9 +39,8 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _signIn() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() {
-      _isLoading = true;
-    });
+    _formStateManager.setLoading(true);
+    _formStateManager.clearErrors();
 
     try {
       await _authService.signInWithEmailAndPassword(
@@ -43,8 +49,8 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (mounted) {
+        _formStateManager.setSuccessMessage('Welcome back!');
         // The AuthWrapper will automatically handle navigation
-        // No need to manually navigate, just show success message
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Welcome back!'),
@@ -53,20 +59,19 @@ class _LoginScreenState extends State<LoginScreen> {
         );
       }
     } catch (error) {
+      final errorMessage = 'Login failed: ${error.toString()}';
+      _formStateManager.setError(errorMessage);
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Login failed: ${error.toString()}'),
+            content: Text(errorMessage),
             backgroundColor: SwiftDashColors.dangerRed,
           ),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      _formStateManager.setLoading(false);
     }
   }
 
@@ -106,7 +111,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: SwiftDashColors.backgroundGrey,
+        backgroundColor: SwiftDashColors.backgroundGrey,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -271,41 +276,42 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ],
                   ),
-                  child: TextFormField(
-                    controller: _passwordController,
-                    obscureText: _obscurePassword,
-                    textInputAction: TextInputAction.done,
-                    onFieldSubmitted: (_) => _signIn(),
-                    decoration: InputDecoration(
-                      labelText: 'Password',
-                      prefixIcon: Icon(Icons.lock_outlined, color: SwiftDashColors.lightBlue),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                          color: SwiftDashColors.textGrey,
+                  child: ValueListenableContainer<bool>(
+                    notifier: _formStateManager.obscurePasswordNotifier,
+                    builder: (context, obscurePassword, child) {
+                      return TextFormField(
+                        controller: _passwordController,
+                        obscureText: obscurePassword,
+                        textInputAction: TextInputAction.done,
+                        onFieldSubmitted: (_) => _signIn(),
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          prefixIcon: Icon(Icons.lock_outlined, color: SwiftDashColors.lightBlue),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                              color: SwiftDashColors.textGrey,
+                            ),
+                            onPressed: _formStateManager.togglePasswordVisibility,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: SwiftDashColors.white,
+                          contentPadding: const EdgeInsets.all(16),
                         ),
-                        onPressed: () {
-                          setState(() {
-                            _obscurePassword = !_obscurePassword;
-                          });
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your password';
+                          }
+                          if (value.length < 6) {
+                            return 'Password must be at least 6 characters';
+                          }
+                          return null;
                         },
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                      filled: true,
-                      fillColor: SwiftDashColors.white,
-                      contentPadding: const EdgeInsets.all(16),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter your password';
-                      }
-                      if (value.length < 6) {
-                        return 'Password must be at least 6 characters';
-                      }
-                      return null;
+                      );
                     },
                   ),
                 ),
@@ -330,49 +336,54 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 24),
                 
                 // Sign In Button
-                Container(
-                  height: 56,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                    boxShadow: [
-                      BoxShadow(
-                        color: SwiftDashColors.darkBlue.withOpacity(0.3),
-                        blurRadius: 15,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _signIn,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.transparent,
-                      shadowColor: Colors.transparent,
-                      shape: RoundedRectangleBorder(
+                ValueListenableContainer<bool>(
+                  notifier: _formStateManager.isLoadingNotifier,
+                  builder: (context, isLoading, child) {
+                    return Container(
+                      height: 56,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                        ),
                         borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(SwiftDashColors.white),
-                            ),
-                          )
-                        : Text(
-                            'Sign In',
-                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: SwiftDashColors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: SwiftDashColors.darkBlue.withOpacity(0.3),
+                            blurRadius: 15,
+                            offset: const Offset(0, 8),
                           ),
-                  ),
+                        ],
+                      ),
+                      child: ElevatedButton(
+                        onPressed: isLoading ? null : _signIn,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.transparent,
+                          shadowColor: Colors.transparent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: isLoading
+                            ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(SwiftDashColors.white),
+                                ),
+                              )
+                            : Text(
+                                'Sign In',
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  color: SwiftDashColors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                      ),
+                    );
+                  },
                 ),
                 
                 const SizedBox(height: 32),

@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/document_upload_service.dart';
 import '../services/auth_service.dart';
+import '../utils/validation_utils.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -20,12 +21,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   File? _vehicleBackImage;
   File? _ltfrbImage;
   final _ltfrbController = TextEditingController();
+  final _plateNumberController = TextEditingController();
+  final _vehicleModelController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
 
   bool _isSaving = false;
 
   @override
   void dispose() {
     _ltfrbController.dispose();
+    _plateNumberController.dispose();
+    _vehicleModelController.dispose();
     super.dispose();
   }
 
@@ -58,6 +64,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+    
     setState(() => _isSaving = true);
     try {
       final user = _authService.currentUser;
@@ -91,6 +101,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (vehicleBackUrl != null) updateData['vehicle_back_picture_url'] = vehicleBackUrl;
       if (ltfrbUrl != null) updateData['ltfrb_picture_url'] = ltfrbUrl;
       if (_ltfrbController.text.trim().isNotEmpty) updateData['ltfrb_number'] = _ltfrbController.text.trim();
+      if (_vehicleModelController.text.trim().isNotEmpty) updateData['vehicle_model'] = _vehicleModelController.text.trim();
+      if (_plateNumberController.text.trim().isNotEmpty) {
+        updateData['plate_number'] = ValidationUtils.formatPlateNumber(_plateNumberController.text.trim());
+      }
 
       await Supabase.instance.client.from('driver_profiles').upsert(updateData);
 
@@ -127,7 +141,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       appBar: AppBar(title: const Text('Edit Profile')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: Column(
+        child: Form(
+          key: _formKey,
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Profile Photo', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -154,6 +170,49 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               controller: _ltfrbController,
               decoration: const InputDecoration(labelText: 'LTFRB Number (optional)'),
             ),
+            const SizedBox(height: 16),
+
+            const Text('Vehicle Details', style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: _vehicleModelController,
+              decoration: const InputDecoration(
+                labelText: 'Vehicle Model',
+                hintText: 'e.g., Honda Click 150i',
+              ),
+              validator: (value) {
+                if (value != null && value.trim().isNotEmpty && !ValidationUtils.isValidVehicleModel(value.trim())) {
+                  return 'Please enter a valid vehicle model';
+                }
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _plateNumberController,
+              decoration: const InputDecoration(
+                labelText: 'License Plate Number',
+                hintText: 'e.g., ABC-1234',
+              ),
+              validator: (value) {
+                if (value != null && value.trim().isNotEmpty && !ValidationUtils.isValidPlateNumber(value.trim())) {
+                  return 'Please enter a valid license plate format';
+                }
+                return null;
+              },
+              onChanged: (value) {
+                // Auto-format as user types
+                if (value.isNotEmpty && ValidationUtils.isValidPlateNumber(value)) {
+                  final formatted = ValidationUtils.formatPlateNumber(value);
+                  if (formatted != value) {
+                    _plateNumberController.value = _plateNumberController.value.copyWith(
+                      text: formatted,
+                      selection: TextSelection.collapsed(offset: formatted.length),
+                    );
+                  }
+                }
+              },
+            ),
             const SizedBox(height: 24),
 
             SizedBox(
@@ -166,6 +225,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 }

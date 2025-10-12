@@ -12,6 +12,8 @@ class Driver {
   final String? vehicleTypeId;
   final String? licenseNumber;
   final String? vehicleModel;
+  final String? plateNumber;
+  final String? profilePictureUrl;
   final bool isVerified;
   final bool isOnline;
   final double? currentLatitude;
@@ -33,6 +35,8 @@ class Driver {
     this.vehicleTypeId,
     this.licenseNumber,
     this.vehicleModel,
+    this.plateNumber,
+    this.profilePictureUrl,
     required this.isVerified,
     required this.isOnline,
     this.currentLatitude,
@@ -61,6 +65,8 @@ class Driver {
       vehicleTypeId: json['vehicle_type_id'],
       licenseNumber: json['license_number'],
       vehicleModel: json['vehicle_model'],
+      plateNumber: json['plate_number'],
+      profilePictureUrl: json['profile_picture_url'],
       isVerified: json['is_verified'] ?? false,
       isOnline: json['is_online'] ?? false,
       currentLatitude: json['current_latitude']?.toDouble(),
@@ -85,6 +91,8 @@ class Driver {
       'vehicle_type_id': vehicleTypeId,
       'license_number': licenseNumber,
       'vehicle_model': vehicleModel,
+      'plate_number': plateNumber,
+      'profile_picture_url': profilePictureUrl,
       'is_verified': isVerified,
       'is_online': isOnline,
       'current_latitude': currentLatitude,

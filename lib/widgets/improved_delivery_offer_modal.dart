@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../models/delivery.dart';
 import '../core/supabase_config.dart';
 import '../widgets/route_preview_map.dart';
+import '../services/mapbox_service.dart';
 
 class ImprovedDeliveryOfferModal extends StatefulWidget {
   final Delivery delivery;
@@ -31,7 +32,7 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
   double _slideProgress = 0.0;
   final double _slideThreshold = 0.7; // 70% slide to accept
   
-  Map<String, dynamic>? _routeData;
+  RouteData? _routeData;
   bool _loadingRoute = false;
   
   @override
@@ -39,8 +40,7 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
     super.initState();
     _initializeAnimations();
     _startCountdown();
-    // Comment out route loading for now to avoid errors
-    // _loadRoutePreview();
+    _loadRoutePreview();
   }
   
   void _initializeAnimations() {
@@ -76,6 +76,38 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
     });
   }
   
+  /// Load route preview data from Mapbox
+  void _loadRoutePreview() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _loadingRoute = true;
+    });
+    
+    try {
+      final routeData = await MapboxService.getRoute(
+        widget.delivery.pickupLatitude,
+        widget.delivery.pickupLongitude,
+        widget.delivery.deliveryLatitude,
+        widget.delivery.deliveryLongitude,
+      );
+      
+      if (mounted) {
+        setState(() {
+          _routeData = routeData;
+          _loadingRoute = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading route preview: $e');
+      if (mounted) {
+        setState(() {
+          _loadingRoute = false;
+        });
+      }
+    }
+  }
+  
   
   String _formatTime(int seconds) {
     final minutes = seconds ~/ 60;
@@ -88,6 +120,9 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
   }
   
   String _formatDuration() {
+    if (_routeData != null) {
+      return MapboxService.formatDuration(_routeData!.duration);
+    }
     return widget.delivery.formattedDuration;
   }
   
@@ -333,7 +368,7 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
                       ),
                     ),
                     
-                    // Route preview map (simplified)
+                    // Route preview map with route polygon
                     if (!_loadingRoute)
                       SizedBox(
                         height: screenHeight * 0.25,
@@ -342,6 +377,7 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
                           pickupLng: widget.delivery.pickupLongitude,
                           deliveryLat: widget.delivery.deliveryLatitude,
                           deliveryLng: widget.delivery.deliveryLongitude,
+                          routeData: _routeData, // Pass route data for polygon
                         ),
                       )
                     else

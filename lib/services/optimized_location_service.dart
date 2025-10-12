@@ -46,11 +46,17 @@ class OptimizedLocationService {
     // Start location broadcast for this delivery
     _realtimeService.startLocationBroadcast(deliveryId);
 
-    // Start background service for when app is minimized
-    await BackgroundLocationService.startLocationTracking(
-      driverId: driverId,
-      deliveryId: deliveryId,
-    );
+    // Start background service for when app is minimized (with fallback)
+    try {
+      await BackgroundLocationService.startLocationTracking(
+        driverId: driverId,
+        deliveryId: deliveryId,
+      );
+      print('✅ Background location service started');
+    } catch (e) {
+      print('⚠️ Failed to start background service, using foreground-only mode: $e');
+      // Continue with foreground-only tracking
+    }
 
     print('✅ Adaptive location tracking started (foreground + background)');
   }
@@ -67,8 +73,13 @@ class OptimizedLocationService {
     _broadcastTimer?.cancel();
     _broadcastTimer = null;
 
-    // Stop background service
-    await BackgroundLocationService.stopLocationTracking();
+    // Stop background service (with error handling)
+    try {
+      await BackgroundLocationService.stopLocationTracking();
+    } catch (e) {
+      print('⚠️ Error stopping background service: $e');
+      // Continue anyway
+    }
 
     _isTracking = false;
     _currentDeliveryId = null;

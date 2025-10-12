@@ -3,6 +3,7 @@ import '../core/supabase_config.dart';
 import '../core/app_assets.dart';
 import '../services/auth_service.dart';
 import '../services/vehicle_type_service.dart';
+
 import '../models/vehicle_type.dart';
 import '../screens/debug_vehicle_types_screen.dart';
 
@@ -26,11 +27,13 @@ class _SignupScreenState extends State<SignupScreen> {
   final _authService = AuthService();
   final _vehicleTypeService = VehicleTypeService();
   
+  // Local state variables
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
-  bool _acceptTerms = false;
   
+  // State variables for vehicle types and form
+  bool _acceptTerms = false;
   List<VehicleType> _vehicleTypes = [];
   VehicleType? _selectedVehicleType;
   bool _isLoadingVehicleTypes = false;

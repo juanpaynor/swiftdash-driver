@@ -3,6 +3,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/supabase_config.dart';
 import '../core/app_assets.dart';
 import '../services/auth_service.dart';
+import '../services/optimized_state_manager.dart';
+import '../services/navigation_manager.dart';
+import '../widgets/optimized_state_widgets.dart';
 import 'login_screen.dart';
 import 'main_map_screen.dart';
 
@@ -15,57 +18,175 @@ class AuthWrapper extends StatefulWidget {
 
 class _AuthWrapperState extends State<AuthWrapper> {
   final _authService = AuthService();
+  final AuthStateManager _authStateManager = AuthStateManager.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeAuthState();
+  }
+
+  void _initializeAuthState() {
+    // Listen to auth state changes and update state manager
+    _authService.authStateChanges.listen((authState) {
+      _authStateManager.updateAuthState(authState);
+      _checkDriverVerification(authState);
+    });
+  }
+
+  Future<void> _checkDriverVerification(AuthState authState) async {
+    if (authState.session != null) {
+      _authStateManager.setLoading(true);
+      try {
+        final isDriver = await _authService.isCurrentUserDriver();
+        _authStateManager.setDriverVerified(isDriver);
+        _authStateManager.clearError();
+      } catch (e) {
+        _authStateManager.setError('Failed to verify driver status: $e');
+      } finally {
+        _authStateManager.setLoading(false);
+      }
+    } else {
+      _authStateManager.setDriverVerified(false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<AuthState>(
-      stream: _authService.authStateChanges,
-      builder: (context, snapshot) {
-        // Show loading spinner while checking auth state
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            backgroundColor: SwiftDashColors.backgroundGrey,
-            body: Center(
-              child: CircularProgressIndicator(
-                color: SwiftDashColors.darkBlue,
+    return NavigationWrapper(
+      isMainFlow: false,
+      child: MultiValueListenable(
+        notifiers: [
+          _authStateManager.authStateNotifier,
+          _authStateManager.isLoadingNotifier,
+          _authStateManager.isDriverVerifiedNotifier,
+          _authStateManager.errorNotifier,
+        ],
+        builder: (context) {
+          final authState = _authStateManager.authState;
+          final isLoading = _authStateManager.isLoading;
+          final isDriverVerified = _authStateManager.isDriverVerified;
+          final error = _authStateManager.error;
+
+          // Show loading spinner while checking auth state
+          if (isLoading || authState == null) {
+            return _buildLoadingScreen();
+          }
+
+          // Handle error states
+          if (error != null) {
+            return _buildErrorScreen(error);
+          }
+
+          // Check if user is logged in
+          final session = authState.session;
+          
+          if (session != null) {
+            if (isDriverVerified) {
+              // User is a verified driver, show main app
+              return const MainMapScreen();
+            } else {
+              // User is not a driver, show error and logout
+              return _buildNotDriverScreen();
+            }
+          } else {
+            // User is not logged in, show login screen
+            return const LoginScreen();
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildLoadingScreen() {
+    return const Scaffold(
+      backgroundColor: SwiftDashColors.backgroundGrey,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            CircularProgressIndicator(
+              color: SwiftDashColors.darkBlue,
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Checking authentication...',
+              style: TextStyle(
+                color: SwiftDashColors.textGrey,
+                fontSize: 16,
               ),
             ),
-          );
-        }
+          ],
+        ),
+      ),
+    );
+  }
 
-        // Check if user is logged in
-        final session = snapshot.hasData ? snapshot.data!.session : null;
-        
-        if (session != null) {
-          // User is logged in, but we need to verify they're a driver
-          return FutureBuilder<bool>(
-            future: _authService.isCurrentUserDriver(),
-            builder: (context, driverSnapshot) {
-              if (driverSnapshot.connectionState == ConnectionState.waiting) {
-                return const Scaffold(
-                  backgroundColor: SwiftDashColors.backgroundGrey,
-                  body: Center(
-                    child: CircularProgressIndicator(
-                      color: SwiftDashColors.darkBlue,
+  Widget _buildErrorScreen(String error) {
+    return Scaffold(
+      backgroundColor: SwiftDashColors.backgroundGrey,
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: SwiftDashColors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: SwiftDashColors.darkBlue.withOpacity(0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, 5),
                     ),
-                  ),
-                );
-              }
-              
-              if (driverSnapshot.data == true) {
-                // User is a verified driver, show main app
-                return const MainMapScreen();
-              } else {
-                // User is not a driver, show error and logout
-                return _buildNotDriverScreen();
-              }
-            },
-          );
-        } else {
-          // User is not logged in, show login screen
-          return const LoginScreen();
-        }
-      },
+                  ],
+                ),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      color: SwiftDashColors.dangerRed,
+                      size: 64,
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Authentication Error',
+                      style: TextStyle(
+                        color: SwiftDashColors.darkBlue,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      error,
+                      style: TextStyle(
+                        color: SwiftDashColors.textGrey,
+                        fontSize: 14,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          _authStateManager.clearError();
+                          _initializeAuthState();
+                        },
+                        child: const Text('Retry'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
   
@@ -171,7 +292,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: ElevatedButton(
-                        onPressed: () async {
+                        onPressed: _authStateManager.isLoading ? null : () async {
+                          _authStateManager.setLoading(true);
                           try {
                             // Show loading indicator
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -195,6 +317,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
                             }
                           } catch (e) {
                             // Show error message but still try to navigate
+                            _authStateManager.setError('Sign out failed: $e');
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
@@ -205,6 +328,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
                               );
                             }
                             print('Sign out error: $e');
+                          } finally {
+                            _authStateManager.setLoading(false);
                           }
                         },
                         style: ElevatedButton.styleFrom(
@@ -238,7 +363,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: ElevatedButton(
-                        onPressed: () async {
+                        onPressed: _authStateManager.isLoading ? null : () async {
+                          _authStateManager.setLoading(true);
                           try {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -259,6 +385,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
                               );
                             }
                           } catch (e) {
+                            _authStateManager.setError('Force sign out failed: $e');
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
@@ -268,6 +395,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
                                 ),
                               );
                             }
+                          } finally {
+                            _authStateManager.setLoading(false);
                           }
                         },
                         style: ElevatedButton.styleFrom(

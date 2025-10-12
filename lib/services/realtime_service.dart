@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import '../models/delivery.dart';
 import '../widgets/improved_delivery_offer_modal.dart';
+import 'optimized_location_service.dart';
 
 class OptimizedRealtimeService {
   static final OptimizedRealtimeService _instance = OptimizedRealtimeService._internal();
@@ -117,8 +118,8 @@ class OptimizedRealtimeService {
 
   // 🔹 2. GPS LOCATION BROADCASTING (NON-PERSISTENT)
   
-  /// Start broadcasting driver location (does NOT store in database)
-  void startLocationBroadcast(String deliveryId) {
+  /// Start broadcasting driver location (WebSocket + GPS tracking)
+  Future<void> startLocationBroadcast(String deliveryId) async {
     final channelName = 'driver-location-$deliveryId';
     
     if (_activeChannels.containsKey(channelName)) {
@@ -126,11 +127,29 @@ class OptimizedRealtimeService {
       return;
     }
     
+    // Start WebSocket channel for broadcasting
     final channel = _supabase.channel(channelName);
-    channel.subscribe();
+    await channel.subscribe();
     _activeChannels[channelName] = channel;
     
-    print('📍 Started location broadcast for delivery: $deliveryId');
+    // Start actual GPS location tracking
+    final driverId = _currentDriverId ?? _authUserId;
+    if (driverId != null) {
+      try {
+        final locationService = OptimizedLocationService();
+        await locationService.startDeliveryTracking(
+          driverId: driverId,
+          deliveryId: deliveryId,
+        );
+        print('🎯 Started GPS location tracking for delivery: $deliveryId');
+      } catch (e) {
+        print('❌ Failed to start GPS tracking: $e');
+      }
+    } else {
+      print('⚠️ Cannot start GPS tracking: driver ID not available');
+    }
+    
+    print('📍 Started location broadcast (WebSocket + GPS tracking) for delivery: $deliveryId');
   }
   
   /// Broadcast current location (temporary, not stored in DB)
@@ -252,7 +271,7 @@ class OptimizedRealtimeService {
         case DeliveryStatus.driverAssigned:
           // Start tracking this specific delivery
           subscribeToSpecificDelivery(delivery.id);
-          startLocationBroadcast(delivery.id);
+          startLocationBroadcast(delivery.id); // Fire and forget for async
           break;
         case DeliveryStatus.delivered:
           // Stop location broadcast for completed delivery
@@ -368,95 +387,10 @@ class OptimizedRealtimeService {
     _currentOffer = null;
   }
   
-  // Guard against concurrent accept attempts
-  static final Set<String> _processingAccepts = <String>{};
-  
-  /// Accept delivery offer (using Edge Function as per customer app AI spec)
+  /// Accept delivery offer (delegating to new optimized workflow)
   Future<bool> acceptDeliveryOffer(String deliveryId, String driverId) async {
-    // Prevent concurrent accepts for the same delivery
-    if (_processingAccepts.contains(deliveryId)) {
-      print('⚠️ Already processing accept for delivery: $deliveryId');
-      return false;
-    }
-    
-    _processingAccepts.add(deliveryId);
-    
-    try {
-      print('✅ Accepting delivery offer: $deliveryId');
-      
-      // Use the dedicated accept_delivery Edge Function as specified by customer app AI
-      final response = await _supabase.functions.invoke(
-        'accept_delivery',
-        body: {
-          'deliveryId': deliveryId,
-          'driverId': driverId,
-          'accept': true,
-        },
-      );
-      
-      if (response.status == 200) {
-        final data = response.data as Map<String, dynamic>;
-        final success = data['ok'] == true;
-        
-        if (success) {
-          print('✅ Delivery accepted successfully: ${data['message']}');
-          
-          // Update driver availability - now busy with delivery
-          await _supabase
-              .from('driver_profiles')
-              .update({'is_available': false})
-              .eq('id', driverId);
-          print('📱 Updated driver availability to false (busy with delivery)');
-          
-          _cancelCurrentOffer();
-          await subscribeToSpecificDelivery(deliveryId);
-          startLocationBroadcast(deliveryId);
-          _processingAccepts.remove(deliveryId);
-          return true;
-        } else {
-          print('❌ Failed to accept delivery: ${data['message']}');
-          _processingAccepts.remove(deliveryId);
-          return false;
-        }
-      } else {
-        print('❌ Accept delivery API call failed with status: ${response.status}');
-        _processingAccepts.remove(deliveryId);
-        return false;
-      }
-    } catch (e) {
-      print('❌ Error accepting delivery offer: $e');
-      
-      // Fallback to direct database update if Edge Function is not available
-      try {
-        print('⚠️ Falling back to direct database update');
-        await _supabase
-            .from('deliveries')
-            .update({
-              'status': 'driver_assigned',
-              'driver_id': driverId,
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .eq('id', deliveryId)
-            .eq('status', 'driver_offered'); // Match the correct status from customer app AI
-        
-        // Update driver availability - now busy with delivery
-        await _supabase
-            .from('driver_profiles')
-            .update({'is_available': false})
-            .eq('id', driverId);
-        
-        _cancelCurrentOffer();
-        await subscribeToSpecificDelivery(deliveryId);
-        startLocationBroadcast(deliveryId);
-        _processingAccepts.remove(deliveryId);
-        return true;
-      } catch (e2) {
-        print('❌ Fallback database update failed: $e2');
-        return false;
-      }
-    } finally {
-      _processingAccepts.remove(deliveryId);
-    }
+    print('🔄 Delegating to new acceptance workflow for delivery: $deliveryId');
+    return await acceptDeliveryOfferNew(deliveryId, driverId);
   }
 
   /// Decline delivery offer (using Edge Function as per customer app AI spec)
@@ -596,10 +530,22 @@ class OptimizedRealtimeService {
     }
   }
   
-  void _stopLocationBroadcast(String deliveryId) {
+  Future<void> _stopLocationBroadcast(String deliveryId) async {
     final channelName = 'driver-location-$deliveryId';
-    _unsubscribeFromChannel(channelName);
-    print('📍 Stopped location broadcast for delivery: $deliveryId');
+    await _unsubscribeFromChannel(channelName);
+    
+    // Stop GPS location tracking
+    try {
+      final locationService = OptimizedLocationService();
+      if (locationService.currentDeliveryId == deliveryId) {
+        await locationService.stopTracking();
+        print('🎯 Stopped GPS location tracking for delivery: $deliveryId');
+      }
+    } catch (e) {
+      print('❌ Failed to stop GPS tracking: $e');
+    }
+    
+    print('📍 Stopped location broadcast (WebSocket + GPS tracking) for delivery: $deliveryId');
   }
 
   // 🔹 7. LEGACY METHODS (Updated)
@@ -714,9 +660,20 @@ class OptimizedRealtimeService {
   }
 
   // 🔹 8. NEW OFFER/ACCEPTANCE WORKFLOW
+  
+  // Guard against concurrent accept attempts
+  static final Set<String> _processingAccepts = <String>{};
 
   /// Accept a delivery offer (NEW WORKFLOW)
   Future<bool> acceptDeliveryOfferNew(String deliveryId, String driverId) async {
+    // Prevent concurrent accepts for the same delivery
+    if (_processingAccepts.contains(deliveryId)) {
+      print('⚠️ Already processing accept for delivery: $deliveryId');
+      return false;
+    }
+    
+    _processingAccepts.add(deliveryId);
+    
     try {
       print('🚨 *** ACCEPTING DELIVERY OFFER (NEW WORKFLOW) ***');
       print('🚨 Delivery ID: $deliveryId');
@@ -766,7 +723,7 @@ class OptimizedRealtimeService {
         await subscribeToSpecificDelivery(deliveryId);
         
         // Start location broadcasting for this delivery
-        startLocationBroadcast(deliveryId);
+        await startLocationBroadcast(deliveryId);
         
         return true;
       } else {
@@ -776,6 +733,8 @@ class OptimizedRealtimeService {
     } catch (e) {
       print('🚨 ❌ ERROR ACCEPTING DELIVERY OFFER: $e');
       return false;
+    } finally {
+      _processingAccepts.remove(deliveryId);
     }
   }
   

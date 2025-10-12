@@ -5,6 +5,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+@pragma('vm:entry-point')
 class BackgroundLocationService {
   static const String _notificationChannelId = 'swiftdash_driver_location';
   static const int _notificationId = 888;
@@ -17,44 +18,58 @@ class BackgroundLocationService {
 
   /// Initialize background service
   static Future<void> initializeService() async {
-    final service = FlutterBackgroundService();
-    
-    /// Create notification channel for Android
-    const AndroidNotificationChannel channel = AndroidNotificationChannel(
-      _notificationChannelId,
-      'SwiftDash Driver Location',
-      description: 'Tracks driver location for active deliveries',
-      importance: Importance.low,
-      enableLights: false,
-      enableVibration: false,
-      playSound: false,
-    );
+    try {
+      final service = FlutterBackgroundService();
+      
+      /// Create notification channel for Android
+      const AndroidNotificationChannel channel = AndroidNotificationChannel(
+        _notificationChannelId,
+        'SwiftDash Driver Location',
+        description: 'Tracks driver location for active deliveries',
+        importance: Importance.low,
+        enableLights: false,
+        enableVibration: false,
+        playSound: false,
+      );
 
-    final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-        FlutterLocalNotificationsPlugin();
+      final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+          FlutterLocalNotificationsPlugin();
 
-    await flutterLocalNotificationsPlugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(channel);
+      // Initialize notifications with error handling
+      try {
+        await flutterLocalNotificationsPlugin
+            .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+            ?.createNotificationChannel(channel);
+        print('✅ Notification channel created');
+      } catch (e) {
+        print('⚠️ Failed to create notification channel: $e');
+        // Continue without notification channel - service can still work
+      }
 
-    await service.configure(
-      androidConfiguration: AndroidConfiguration(
-        onStart: onStart,
-        autoStart: false,
-        isForegroundMode: true,
-        notificationChannelId: _notificationChannelId,
-        initialNotificationTitle: 'SwiftDash Driver',
-        initialNotificationContent: 'Ready for deliveries',
-        foregroundServiceNotificationId: _notificationId,
-      ),
-      iosConfiguration: IosConfiguration(
-        autoStart: false,
-        onForeground: onStart,
-        onBackground: onIosBackground,
-      ),
-    );
+      // Configure service with error handling
+      await service.configure(
+        androidConfiguration: AndroidConfiguration(
+          onStart: onStart,
+          autoStart: false,
+          isForegroundMode: true,
+          notificationChannelId: _notificationChannelId,
+          initialNotificationTitle: 'SwiftDash Driver',
+          initialNotificationContent: 'Ready for deliveries',
+          foregroundServiceNotificationId: _notificationId,
+        ),
+        iosConfiguration: IosConfiguration(
+          autoStart: false,
+          onForeground: onStart,
+          onBackground: onIosBackground,
+        ),
+      );
 
-    print('✅ Background service initialized');
+      print('✅ Background service initialized');
+    } catch (e) {
+      print('❌ Failed to initialize background service: $e');
+      // Re-throw the error so main.dart can handle it gracefully
+      throw Exception('Background service initialization failed: $e');
+    }
   }
 
   /// Start background location tracking
@@ -84,10 +99,17 @@ class BackgroundLocationService {
     _isStarting = true;
     _lastStartTime = now;
     
-    final service = FlutterBackgroundService();
-    
     try {
+      final service = FlutterBackgroundService();
+      
+      // Check if service is available and configured
+      final isRunning = await service.isRunning();
+      print('📍 Background service status: ${isRunning ? 'running' : 'stopped'}');
+      
       await service.startService();
+      
+      // Small delay to ensure service is ready
+      await Future.delayed(const Duration(milliseconds: 300));
       
       service.invoke('start_location_tracking', {
         'driver_id': driverId,
@@ -98,6 +120,19 @@ class BackgroundLocationService {
       print('🚀 Background location tracking started for delivery: $deliveryId');
     } catch (e) {
       print('❌ Error starting background service: $e');
+      
+      // Check if it's a specific error we can handle gracefully
+      if (e.toString().contains('Service not available') || 
+          e.toString().contains('Permission denied') ||
+          e.toString().contains('Battery optimization') ||
+          e.toString().contains('Background execution not allowed')) {
+        print('⚠️ Background service not available due to device restrictions');
+        print('🔄 Continuing with foreground-only location tracking');
+      } else {
+        print('❌ Unexpected background service error: $e');
+        print('🔄 App will continue without background service');
+      }
+      // Don't rethrow to prevent app crash - let foreground service continue
     } finally {
       _isStarting = false;
     }
@@ -202,6 +237,7 @@ class BackgroundLocationService {
   }
 
   /// Update location and broadcast to customers
+  @pragma('vm:entry-point')
   static Future<void> _updateLocation({
     required ServiceInstance service,
     required FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin,
@@ -289,6 +325,7 @@ class BackgroundLocationService {
   }
 
   /// Broadcast location via WebSocket (NO database pollution)
+  @pragma('vm:entry-point')
   static Future<void> _broadcastLocationToCustomer({
     required String deliveryId,
     required String driverId,

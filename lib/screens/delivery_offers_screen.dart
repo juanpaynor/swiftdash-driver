@@ -169,7 +169,8 @@ class _DeliveryOffersScreenState extends State<DeliveryOffersScreen> {
     if (_driverId == null) return false;
 
     try {
-      final success = await _realtimeService.acceptDeliveryOffer(delivery.id, _driverId!);
+      // Use the NEW workflow method with proper timeout handling
+      final success = await _realtimeService.acceptDeliveryOfferNew(delivery.id, _driverId!);
 
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(

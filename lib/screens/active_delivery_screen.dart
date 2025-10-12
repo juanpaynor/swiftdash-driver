@@ -6,6 +6,7 @@ import '../models/delivery.dart';
 import '../core/supabase_config.dart';
 import '../services/driver_flow_service.dart';
 import '../services/location_service.dart';
+import '../services/optimized_state_manager.dart';
 import '../widgets/route_preview_map.dart';
 
 class ActiveDeliveryScreen extends StatefulWidget {
@@ -27,6 +28,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
   
   final DriverFlowService _driverFlow = DriverFlowService();
   final LocationService _locationService = LocationService.instance;
+  final DeliveryStateManager _deliveryState = DeliveryStateManager.instance;
   
   Delivery? _currentDelivery;
   bool _isUpdatingStatus = false;
@@ -37,6 +39,10 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
     _currentDelivery = widget.delivery;
     _initializeAnimations();
     _startLocationTracking();
+    
+    // Initialize delivery state
+    _deliveryState.setActiveDelivery(widget.delivery);
+    _deliveryState.setError(null); // Clear any previous errors
   }
   
   void _initializeAnimations() {
@@ -64,6 +70,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
   Future<void> _updateDeliveryStatus(String newStatus) async {
     if (_isUpdatingStatus) return;
     
+    _deliveryState.setLoading(true);
     setState(() => _isUpdatingStatus = true);
     
     try {
@@ -91,8 +98,10 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
       final success = await _driverFlow.updateDeliveryStatus(context, status);
 
       if (success) {
+        final updatedDelivery = _currentDelivery!.copyWith(status: status);
+        _deliveryState.updateDeliveryStatus(_currentDelivery!.id, status);
         setState(() {
-          _currentDelivery = _currentDelivery!.copyWith(status: status);
+          _currentDelivery = updatedDelivery;
         });
         
         if (status == DeliveryStatus.delivered) {
@@ -101,6 +110,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
         }
       }
     } catch (e) {
+      _deliveryState.setError('Failed to update delivery status');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to update status: $e'),
@@ -108,6 +118,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
         ),
       );
     } finally {
+      _deliveryState.setLoading(false);
       setState(() => _isUpdatingStatus = false);
     }
   }
@@ -223,54 +234,57 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
     VoidCallback onTap,
     Color color,
   ) {
-    return GestureDetector(
-      onTap: _isUpdatingStatus ? null : onTap,
-      child: AnimatedBuilder(
-        animation: _pulseAnimation,
-        builder: (context, child) {
-          return Transform.scale(
-            scale: _pulseAnimation.value,
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withOpacity(0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  if (_isUpdatingStatus)
-                    const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(SwiftDashColors.white),
-                      ),
-                    )
-                  else
-                    Icon(icon, color: SwiftDashColors.white),
-                  const SizedBox(width: 8),
-                  Text(
-                    text,
-                    style: const TextStyle(
-                      color: SwiftDashColors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 16,
+    return ValueListenableBuilder<bool>(
+      valueListenable: _deliveryState.isLoadingNotifier,
+      builder: (context, isLoading, child) => GestureDetector(
+        onTap: isLoading || _isUpdatingStatus ? null : onTap,
+        child: AnimatedBuilder(
+          animation: _pulseAnimation,
+          builder: (context, child) {
+            return Transform.scale(
+              scale: _pulseAnimation.value,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: color.withOpacity(0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
                     ),
-                  ),
-                ],
+                  ],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (isLoading || _isUpdatingStatus)
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(SwiftDashColors.white),
+                        ),
+                      )
+                    else
+                      Icon(icon, color: SwiftDashColors.white),
+                    const SizedBox(width: 8),
+                    Text(
+                      text,
+                      style: const TextStyle(
+                        color: SwiftDashColors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
@@ -498,6 +512,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
   void dispose() {
     _pulseController.dispose();
     _locationService.stopLocationTracking();
+    _deliveryState.setError(null); // Clear errors when leaving
     super.dispose();
   }
   
@@ -550,14 +565,41 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
           ),
         ],
       ),
-      body: Column(
-        children: [
-          // Route preview map
-          SizedBox(
-            height: MediaQuery.of(context).size.height * 0.3,
-            child: RoutePreviewMap(
-              pickupLat: delivery.pickupLatitude,
-              pickupLng: delivery.pickupLongitude,
+      body: ValueListenableBuilder<String?>(
+        valueListenable: _deliveryState.errorNotifier,
+        builder: (context, error, child) => Column(
+          children: [
+            // Error banner
+            if (error != null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                color: SwiftDashColors.dangerRed,
+                child: Row(
+                  children: [
+                    const Icon(Icons.error, color: SwiftDashColors.white, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        error,
+                        style: const TextStyle(color: SwiftDashColors.white),
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: SwiftDashColors.white, size: 16),
+                      onPressed: () => _deliveryState.setError(null),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
+              ),
+            // Route preview map
+            SizedBox(
+              height: MediaQuery.of(context).size.height * 0.3,
+              child: RoutePreviewMap(
+                pickupLat: delivery.pickupLatitude,
+                pickupLng: delivery.pickupLongitude,
               deliveryLat: delivery.deliveryLatitude,
               deliveryLng: delivery.deliveryLongitude,
             ),
@@ -825,6 +867,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
             ),
           ),
         ],
+        ),
       ),
     );
   }
@@ -836,39 +879,42 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
     VoidCallback onTap,
     Color color,
   ) {
-    return GestureDetector(
-      onTap: _isUpdatingStatus ? null : onTap,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: color.withOpacity(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              color: SwiftDashColors.white,
-              size: 20,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              text,
-              style: const TextStyle(
-                color: SwiftDashColors.white,
-                fontWeight: FontWeight.w600,
-                fontSize: 16,
+    return ValueListenableBuilder<bool>(
+      valueListenable: _deliveryState.isLoadingNotifier,
+      builder: (context, isLoading, child) => GestureDetector(
+        onTap: isLoading || _isUpdatingStatus ? null : onTap,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: color.withOpacity(0.3),
+                blurRadius: 8,
+                offset: const Offset(0, 4),
               ),
-            ),
-          ],
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                color: SwiftDashColors.white,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                text,
+                style: const TextStyle(
+                  color: SwiftDashColors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1046,6 +1092,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
     String recipientName,
     String notes,
   ) async {
+    _deliveryState.setLoading(true);
     setState(() => _isUpdatingStatus = true);
 
     try {
@@ -1061,15 +1108,18 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', _currentDelivery!.id);
 
-      // Update local state
+      // Update local state and delivery state manager
+      final completedDelivery = _currentDelivery!.copyWith(
+        status: DeliveryStatus.delivered,
+        proofPhotoUrl: photoUrl,
+        recipientName: recipientName,
+        deliveryNotes: notes,
+        completedAt: DateTime.now(),
+      );
+      
+      _deliveryState.updateDeliveryStatus(_currentDelivery!.id, DeliveryStatus.delivered);
       setState(() {
-        _currentDelivery = _currentDelivery!.copyWith(
-          status: DeliveryStatus.delivered,
-          proofPhotoUrl: photoUrl,
-          recipientName: recipientName,
-          deliveryNotes: notes,
-          completedAt: DateTime.now(),
-        );
+        _currentDelivery = completedDelivery;
       });
 
       // Show success message
@@ -1087,6 +1137,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
       }
 
     } catch (e) {
+      _deliveryState.setError('Failed to complete delivery');
       print('Error completing delivery: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1095,6 +1146,7 @@ class _ActiveDeliveryScreenState extends State<ActiveDeliveryScreen>
         ),
       );
     } finally {
+      _deliveryState.setLoading(false);
       setState(() => _isUpdatingStatus = false);
     }
   }

@@ -4,6 +4,7 @@ import '../models/delivery.dart';
 import '../services/realtime_service.dart';
 import '../services/auth_service.dart';
 import '../services/driver_flow_service.dart';
+import '../services/optimized_state_manager.dart';
 import '../core/supabase_config.dart';
 import '../screens/active_delivery_screen.dart';
 
@@ -18,6 +19,7 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
   final RealtimeService _realtimeService = RealtimeService();
   final AuthService _authService = AuthService();
   final DriverFlowService _driverFlow = DriverFlowService();
+  final DeliveryStateManager _deliveryState = DeliveryStateManager.instance;
   
   List<Delivery> _availableOffers = [];
   List<Delivery> _activeDeliveries = [];
@@ -73,16 +75,28 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
     try {
       if (_driverId == null) return;
       
+      _deliveryState.setLoading(true);
+      
       // Load available offers and active deliveries
       final offers = await _realtimeService.getAvailableDeliveryOffers();
       final active = await _realtimeService.getPendingDeliveries(_driverId!);
+      
+      // Update state managers
+      _deliveryState.clearOffers();
+      for (final offer in offers) {
+        _deliveryState.addOffer(offer);
+      }
+      _deliveryState.setActiveDeliveries(active);
       
       setState(() {
         _availableOffers = offers;
         _activeDeliveries = active;
       });
     } catch (e) {
+      _deliveryState.setError('Failed to load data');
       _showError('Failed to load data: $e');
+    } finally {
+      _deliveryState.setLoading(false);
     }
   }
   
@@ -98,6 +112,8 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
   
   Future<bool> _acceptDeliveryOffer(String deliveryId, String driverId) async {
     try {
+      _deliveryState.setLoading(true);
+      
       // Find the delivery object
       Delivery? delivery;
       try {
@@ -111,6 +127,7 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
       }
 
       if (delivery == null) {
+        _deliveryState.setError('Delivery not found');
         _showError('Delivery not found');
         return false;
       }
@@ -119,19 +136,28 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
       final success = await _driverFlow.acceptDeliveryOffer(context, delivery);
 
       if (success) {
+        // Update state manager
+        _deliveryState.removeOffer(deliveryId);
+        _deliveryState.setActiveDelivery(delivery);
+        
         // Refresh data
         await _loadData();
       }
 
       return success;
     } catch (e) {
+      _deliveryState.setError('Failed to accept delivery');
       _showError('Failed to accept delivery: $e');
       return false;
+    } finally {
+      _deliveryState.setLoading(false);
     }
   }
 
   Future<bool> _declineDeliveryOffer(String deliveryId, String driverId) async {
     try {
+      _deliveryState.setLoading(true);
+      
       // Find the delivery object
       Delivery? delivery;
       try {
@@ -145,6 +171,7 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
       }
 
       if (delivery == null) {
+        _deliveryState.setError('Delivery not found');
         _showError('Delivery not found');
         return false;
       }
@@ -153,18 +180,27 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
       final success = await _driverFlow.declineDeliveryOffer(context, delivery);
 
       if (success) {
+        // Update state manager to remove the declined offer
+        _deliveryState.removeOffer(deliveryId);
+        
         // Refresh data to remove the declined offer
         await _loadData();
       }
 
       return success;
     } catch (e) {
+      _deliveryState.setError('Failed to decline delivery');
       _showError('Failed to decline delivery: $e');
       return false;
+    } finally {
+      _deliveryState.setLoading(false);
     }
   }
   
   void _updateActiveDelivery(Delivery delivery) {
+    // Update state manager
+    _deliveryState.updateDeliveryStatus(delivery.id, delivery.status);
+    
     setState(() {
       final index = _activeDeliveries.indexWhere((d) => d.id == delivery.id);
       if (index != -1) {
@@ -194,32 +230,81 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
   
   @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return Scaffold(
-        backgroundColor: SwiftDashColors.backgroundGrey,
-        appBar: AppBar(
-          title: const Text('Delivery Offers'),
-        ),
-        body: const Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-    
-    return Scaffold(
-      backgroundColor: SwiftDashColors.backgroundGrey,
-      appBar: AppBar(
-        title: const Text('Delivery Offers'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
+    return ValueListenableBuilder<bool>(
+      valueListenable: _deliveryState.isLoadingNotifier,
+      builder: (context, isStateLoading, child) {
+        if (_isLoading) {
+          return Scaffold(
+            backgroundColor: SwiftDashColors.backgroundGrey,
+            appBar: AppBar(
+              title: const Text('Delivery Offers'),
+            ),
+            body: const Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+        
+        return Scaffold(
+          backgroundColor: SwiftDashColors.backgroundGrey,
+          appBar: AppBar(
+            title: Row(
+              children: [
+                const Text('Delivery Offers'),
+                if (isStateLoading) ...[
+                  const SizedBox(width: 16),
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(SwiftDashColors.white),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                onPressed: isStateLoading ? null : _loadData,
+              ),
+            ],
           ),
-        ],
-      ),
-      body: RefreshIndicator(
-        onRefresh: _loadData,
-        child: CustomScrollView(
+      body: ValueListenableBuilder<String?>(
+            valueListenable: _deliveryState.errorNotifier,
+            builder: (context, error, child) => Column(
+              children: [
+                // Error banner
+                if (error != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    color: SwiftDashColors.dangerRed,
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error, color: SwiftDashColors.white, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            error,
+                            style: const TextStyle(color: SwiftDashColors.white),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: SwiftDashColors.white, size: 16),
+                          onPressed: () => _deliveryState.setError(null),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                        ),
+                      ],
+                    ),
+                  ),
+                // Main content
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _loadData,
+                    child: CustomScrollView(
           slivers: [
             // Active Deliveries Section
             if (_activeDeliveries.isNotEmpty) ...[
@@ -309,8 +394,14 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
                 ),
               ),
           ],
-        ),
-      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
   
