@@ -56,6 +56,7 @@ class BackgroundLocationService {
           initialNotificationTitle: 'SwiftDash Driver',
           initialNotificationContent: 'Ready for deliveries',
           foregroundServiceNotificationId: _notificationId,
+          // Use a simple built-in icon to avoid resource issues
         ),
         iosConfiguration: IosConfiguration(
           autoStart: false,
@@ -167,6 +168,57 @@ class BackgroundLocationService {
     return await service.isRunning();
   }
 
+  /// Start foreground service when driver goes online (keeps app alive in background)
+  static Future<void> startOnlineStatusService({
+    required String driverId,
+  }) async {
+    try {
+      final service = FlutterBackgroundService();
+      
+      // Check if service is already running
+      final isRunning = await service.isRunning();
+      
+      if (!isRunning) {
+        await service.startService();
+        print('🚀 Foreground service started - driver online');
+      } else {
+        print('✅ Foreground service already running');
+      }
+      
+      // Send online status command to update notification
+      service.invoke('set_online_status', {
+        'driver_id': driverId,
+        'is_online': true,
+      });
+      
+    } catch (e) {
+      print('❌ Error starting online status service: $e');
+      throw Exception('Failed to start foreground service: $e');
+    }
+  }
+
+  /// Stop foreground service when driver goes offline
+  static Future<void> stopOnlineStatusService() async {
+    try {
+      final service = FlutterBackgroundService();
+      
+      // Only stop if no active delivery tracking
+      if (_currentTrackingId == null) {
+        service.invoke('stop_service');
+        print('🛑 Foreground service stopped - driver offline');
+      } else {
+        // Update notification but keep service running for active delivery
+        service.invoke('set_online_status', {
+          'is_online': false,
+        });
+        print('📍 Driver offline but keeping service for active delivery');
+      }
+      
+    } catch (e) {
+      print('❌ Error stopping online status service: $e');
+    }
+  }
+
   /// Background service entry point
   @pragma('vm:entry-point')
   static void onStart(ServiceInstance service) async {
@@ -179,8 +231,43 @@ class BackgroundLocationService {
     String? currentDriverId;
     String? currentDeliveryId;
     Timer? locationTimer;
+    bool isOnline = false;
 
     print('🚀 Background service started');
+
+    // Listen for online status updates
+    service.on('set_online_status').listen((event) async {
+      print('📱 Received online status update: $event');
+      
+      if (event != null && event['driver_id'] != null) {
+        currentDriverId = event['driver_id'];
+      }
+      
+      isOnline = event?['is_online'] ?? false;
+      
+      // Update notification based on status
+      final title = isOnline ? 'SwiftDash Driver - Online' : 'SwiftDash Driver - Offline';
+      final content = isOnline 
+          ? 'You are online and available for deliveries' 
+          : 'You are offline';
+      
+      await flutterLocalNotificationsPlugin.show(
+        _notificationId,
+        title,
+        content,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _notificationChannelId,
+            'SwiftDash Driver Location',
+            importance: Importance.low,
+            priority: Priority.low,
+            ongoing: true,
+            autoCancel: false,
+            showWhen: false,
+          ),
+        ),
+      );
+    });
 
     // Listen for start tracking command
     service.on('start_location_tracking').listen((event) async {
@@ -192,8 +279,8 @@ class BackgroundLocationService {
       // Cancel existing timer if any
       locationTimer?.cancel();
       
-      // Start location tracking timer
-      locationTimer = Timer.periodic(const Duration(seconds: 15), (timer) async {
+      // Start location tracking timer (3 seconds for smooth customer tracking)
+      locationTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
         await _updateLocation(
           service: service,
           flutterLocalNotificationsPlugin: flutterLocalNotificationsPlugin,
@@ -268,7 +355,7 @@ class BackgroundLocationService {
       final speedKmH = (position.speed * 3.6).clamp(0.0, 200.0); // Convert m/s to km/h
 
       // Broadcast location via Supabase realtime
-      await _broadcastLocationToCustomer(
+      await _broadcastLocationViaWebSocket(
         deliveryId: deliveryId,
         driverId: driverId,
         latitude: position.latitude,
@@ -288,7 +375,6 @@ class BackgroundLocationService {
             _notificationChannelId,
             'SwiftDash Driver Location',
             channelDescription: 'Tracks driver location for active deliveries',
-            icon: 'ic_launcher',
             ongoing: true,
             autoCancel: false,
             importance: Importance.low,
@@ -296,6 +382,7 @@ class BackgroundLocationService {
             enableLights: false,
             enableVibration: false,
             playSound: false,
+            icon: '@mipmap/ic_launcher', // Use app launcher icon
           ),
         ),
       );
@@ -316,8 +403,8 @@ class BackgroundLocationService {
             'SwiftDash Driver Location',
             importance: Importance.low,
             priority: Priority.low,
-            icon: 'ic_launcher',
             ongoing: true,
+            icon: '@mipmap/ic_launcher', // Use app launcher icon
           ),
         ),
       );
@@ -326,9 +413,9 @@ class BackgroundLocationService {
 
   /// Broadcast location via WebSocket (NO database pollution)
   @pragma('vm:entry-point')
-  static Future<void> _broadcastLocationToCustomer({
-    required String deliveryId,
+  static Future<void> _broadcastLocationViaWebSocket({
     required String driverId,
+    required String deliveryId,
     required double latitude,
     required double longitude,
     required double speedKmH,
@@ -336,7 +423,12 @@ class BackgroundLocationService {
     required double accuracy,
   }) async {
     try {
-      // Initialize Supabase client for background service
+      // Check if Supabase is initialized in background service context
+      if (!Supabase.instance.isInitialized) {
+        print('⚠️ Supabase not initialized in background service - skipping WebSocket broadcast');
+        return;
+      }
+      
       final supabaseClient = Supabase.instance.client;
       
       // Create temporary WebSocket channel for this delivery
@@ -364,6 +456,85 @@ class BackgroundLocationService {
       
     } catch (e) {
       print('❌ Error broadcasting location via WebSocket: $e');
+    }
+  }
+  
+  /// Update the foreground notification with delivery status info
+  /// This allows updating notification from the main app when status changes
+  static Future<void> updateNotification({
+    required String title,
+    required String body,
+  }) async {
+    try {
+      final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+          FlutterLocalNotificationsPlugin();
+      
+      await flutterLocalNotificationsPlugin.show(
+        _notificationId,
+        title,
+        body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _notificationChannelId,
+            'SwiftDash Driver Location',
+            channelDescription: 'Tracks driver location for active deliveries',
+            ongoing: true,
+            autoCancel: false,
+            importance: Importance.low,
+            priority: Priority.low,
+            enableLights: false,
+            enableVibration: false,
+            playSound: false,
+            icon: '@mipmap/ic_launcher',
+          ),
+        ),
+      );
+      
+      print('🔔 Background notification updated: $title - $body');
+    } catch (e) {
+      print('❌ Error updating notification: $e');
+    }
+  }
+  
+  /// Show a foreground service notification (called when starting tracking)
+  static Future<void> showForegroundNotification({
+    required String deliveryId,
+    String? customerName,
+  }) async {
+    try {
+      final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+          FlutterLocalNotificationsPlugin();
+      
+      final title = 'SwiftDash Driver - Active Delivery';
+      final body = customerName != null 
+          ? 'Delivering to $customerName'
+          : 'Location tracking active';
+      
+      await flutterLocalNotificationsPlugin.show(
+        _notificationId,
+        title,
+        body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            _notificationChannelId,
+            'SwiftDash Driver Location',
+            channelDescription: 'Tracks driver location for active deliveries',
+            ongoing: true,
+            autoCancel: false,
+            importance: Importance.low,
+            priority: Priority.low,
+            enableLights: false,
+            enableVibration: false,
+            playSound: false,
+            icon: '@mipmap/ic_launcher',
+          ),
+        ),
+        payload: deliveryId,
+      );
+      
+      print('🔔 Foreground notification shown for delivery: $deliveryId');
+    } catch (e) {
+      print('❌ Error showing foreground notification: $e');
     }
   }
 }

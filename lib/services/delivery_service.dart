@@ -1,8 +1,10 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/delivery.dart';
+import 'delivery_stop_service.dart';
 
 class DeliveryService {
   final SupabaseClient _supabase = Supabase.instance.client;
+  final DeliveryStopService _stopService = DeliveryStopService();
   
   // Get available deliveries for a driver (pending assignments)
   Future<List<Delivery>> getAvailableDeliveries() async {
@@ -198,5 +200,33 @@ class DeliveryService {
         .map((data) => data
             .map((delivery) => Delivery.fromJson(delivery))
             .toList());
+  }
+  
+  // Get delivery with stops loaded (for multi-stop deliveries)
+  Future<Delivery> getDeliveryWithStops(String deliveryId) async {
+    try {
+      final response = await _supabase
+          .from('deliveries')
+          .select()
+          .eq('id', deliveryId)
+          .single();
+      
+      final delivery = Delivery.fromJson(response);
+      
+      // If multi-stop, load the stops
+      if (delivery.isMultiStop) {
+        final stops = await _stopService.getDeliveryStops(deliveryId);
+        return delivery.copyWith(stops: stops);
+      }
+      
+      return delivery;
+    } catch (e) {
+      throw Exception('Failed to fetch delivery with stops: $e');
+    }
+  }
+  
+  // Check if delivery is multi-stop
+  bool isMultiStopDelivery(Delivery delivery) {
+    return delivery.isMultiStop && delivery.totalStops > 1;
   }
 }

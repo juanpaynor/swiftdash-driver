@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/driver.dart';
 import '../models/delivery.dart';
 import '../services/auth_service.dart';
@@ -69,9 +70,25 @@ class AppStateManager extends ChangeNotifier {
       // Load current driver profile
       await _loadDriverProfile();
       
-      // Load active deliveries if driver exists
+      // Initialize realtime subscriptions and listen for offers
       if (_currentDriver != null) {
         await _loadActiveDeliveries();
+        
+        // Set up realtime subscriptions
+        try {
+          await _realtimeService.initializeRealtimeSubscriptions(_currentDriver!.id);
+          print('✅ Realtime subscriptions initialized for driver: ${_currentDriver!.id}');
+          
+          // Listen for new delivery offers
+          _realtimeService.offerModalStream.listen((delivery) {
+            print('🚨 NEW OFFER RECEIVED IN APP STATE MANAGER: ${delivery.id}');
+            addDeliveryOffer(delivery);
+          });
+          
+          print('✅ Offer modal stream listener set up');
+        } catch (e) {
+          print('❌ Failed to set up realtime subscriptions: $e');
+        }
       }
       
       _isInitialized = true;
@@ -109,15 +126,23 @@ class AppStateManager extends ChangeNotifier {
       final newStatus = !_isOnline;
       
       if (newStatus) {
-        // Going online - Note: BuildContext should be passed from UI
-        // For now, we'll handle this differently
+        // Going online - Initialize realtime subscriptions
+        print('🔥 Driver going online - Current driver ID: ${_currentDriver!.id}');
+        
+        // Re-initialize realtime subscriptions to ensure they're active
+        try {
+          await _realtimeService.initializeRealtimeSubscriptions(_currentDriver!.id);
+          print('✅ Realtime subscriptions re-initialized for driver: ${_currentDriver!.id}');
+        } catch (e) {
+          print('❌ Failed to initialize realtime subscriptions: $e');
+        }
+        
         _isOnline = true;
         _isLocationTracking = true;
         await _loadAvailableOffers();
         print('✅ Driver is now online');
       } else {
-        // Going offline - Note: BuildContext should be passed from UI  
-        // For now, we'll handle this differently
+        // Going offline
         _isOnline = false;
         _isLocationTracking = false;
         _availableOffers.clear();
@@ -320,6 +345,45 @@ class AppStateManager extends ChangeNotifier {
   void _clearError() {
     _error = null;
     notifyListeners();
+  }
+
+  /// Debug method to check realtime connection
+  Future<void> debugRealtimeConnection() async {
+    if (_currentDriver == null) {
+      print('❌ No current driver for debugging');
+      return;
+    }
+    
+    print('🔍 === DEBUGGING REALTIME CONNECTION ===');
+    print('🔍 Current driver ID: ${_currentDriver!.id}');
+    print('🔍 Driver online status: $_isOnline');
+    print('🔍 Available offers: ${_availableOffers.length}');
+    
+    try {
+      // Re-initialize subscriptions
+      await _realtimeService.initializeRealtimeSubscriptions(_currentDriver!.id);
+      print('✅ Realtime subscriptions re-initialized');
+      
+      // Check for pending deliveries
+      final pending = await _realtimeService.getPendingDeliveries(_currentDriver!.id);
+      print('🔍 Pending deliveries found: ${pending.length}');
+      
+      // Test direct database query for driver_offered status
+      final client = Supabase.instance.client;
+      final offered = await client
+          .from('deliveries')
+          .select()
+          .eq('driver_id', _currentDriver!.id)
+          .eq('status', 'driver_offered');
+      
+      print('🔍 Direct database query for driver_offered: ${offered.length} results');
+      for (final delivery in offered) {
+        print('  - Delivery ${delivery['id']}: ${delivery['status']}');
+      }
+      
+    } catch (e) {
+      print('❌ Debug error: $e');
+    }
   }
 
   @override

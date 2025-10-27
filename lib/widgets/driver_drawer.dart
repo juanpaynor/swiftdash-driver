@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/driver.dart';
 import '../services/auth_service.dart';
+import '../services/driver_flow_service.dart';
 import '../core/supabase_config.dart';
 import '../screens/edit_profile_screen.dart';
 
@@ -101,6 +102,67 @@ class DriverDrawer extends StatelessWidget {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
+                // Active Delivery Item (conditionally shown)
+                FutureBuilder<bool>(
+                  future: _checkActiveDelivery(),
+                  builder: (context, snapshot) {
+                    final hasActiveDelivery = snapshot.data == true;
+                    
+                    if (!hasActiveDelivery) return const SizedBox.shrink();
+                    
+                    return Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [SwiftDashColors.successGreen, SwiftDashColors.successGreen.withOpacity(0.8)],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: ListTile(
+                        leading: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: SwiftDashColors.white.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Icon(
+                            Icons.local_shipping,
+                            color: SwiftDashColors.white,
+                            size: 20,
+                          ),
+                        ),
+                        title: const Text(
+                          'Active Delivery',
+                          style: TextStyle(
+                            color: SwiftDashColors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        subtitle: const Text(
+                          'Continue your delivery',
+                          style: TextStyle(
+                            color: SwiftDashColors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w300,
+                          ),
+                        ),
+                        trailing: const Icon(
+                          Icons.arrow_forward_ios,
+                          color: SwiftDashColors.white,
+                          size: 16,
+                        ),
+                        onTap: () async {
+                          Navigator.of(context).pop();
+                          await _navigateToActiveDelivery(context);
+                        },
+                      ),
+                    );
+                  },
+                ),
+                
+                const Divider(color: SwiftDashColors.lightBlue, thickness: 1),
+                
                 _buildDrawerItem(
                   icon: Icons.person,
                   title: 'Driver Profile',
@@ -210,5 +272,61 @@ class DriverDrawer extends StatelessWidget {
       hoverColor: SwiftDashColors.lightBlue.withOpacity(0.1),
       splashColor: SwiftDashColors.lightBlue.withOpacity(0.2),
     );
+  }
+
+  /// Check if driver has an active delivery
+  Future<bool> _checkActiveDelivery() async {
+    try {
+      final driverFlow = DriverFlowService();
+      await driverFlow.initialize();
+      return driverFlow.hasActiveDelivery;
+    } catch (e) {
+      print('Error checking active delivery: $e');
+      return false;
+    }
+  }
+
+  /// Navigate to active delivery screen
+  Future<void> _navigateToActiveDelivery(BuildContext context) async {
+    try {
+      // Check if widget is still mounted before any async operations
+      if (!context.mounted) return;
+      
+      final driverFlow = DriverFlowService();
+      await driverFlow.initialize();
+      
+      // Check if widget is still mounted after async operation
+      if (!context.mounted) return;
+      
+      // DEPRECATED: Navigation to EnhancedActiveDeliveryScreen removed
+      // Active deliveries now shown on main_map_screen
+      final activeDelivery = driverFlow.activeDelivery;
+      if (driverFlow.hasActiveDelivery && activeDelivery != null) {
+        print('⚠️ Active Delivery navigation tapped but deprecated');
+        // Close drawer instead
+        if (context.mounted) {
+          Navigator.of(context).pop();
+        }
+      } else {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No active delivery found'),
+              backgroundColor: SwiftDashColors.warningOrange,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('Error navigating to active delivery: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error accessing active delivery: $e'),
+            backgroundColor: SwiftDashColors.dangerRed,
+          ),
+        );
+      }
+    }
   }
 }

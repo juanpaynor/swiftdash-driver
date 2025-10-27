@@ -169,17 +169,19 @@ class _AppLifecycleManagerState extends State<AppLifecycleManager> with WidgetsB
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     
+    print('🧭 Navigation Manager lifecycle: $state');
+    
     switch (state) {
       case AppLifecycleState.resumed:
-        print('🔄 App resumed');
+        print('🔄 App resumed - syncing navigation state');
         _handleAppResumed();
         break;
       case AppLifecycleState.paused:
-        print('⏸️ App paused');
+        print('⏸️ App paused - KEEPING location services active');
         _handleAppPaused();
         break;
       case AppLifecycleState.detached:
-        print('📱 App detached');
+        print('📱 App detached - preparing for termination');
         _handleAppDetached();
         break;
       default:
@@ -189,17 +191,27 @@ class _AppLifecycleManagerState extends State<AppLifecycleManager> with WidgetsB
   
   void _handleAppResumed() {
     // App came back to foreground
-    // Can refresh data, resume location tracking, etc.
+    // Refresh navigation data
+    // Sync any missed location updates
+    print('✅ Navigation manager: App resumed, refreshing state');
   }
   
   void _handleAppPaused() {
     // App went to background
-    // Can save state, pause non-critical operations, etc.
+    // ✅ CRITICAL: DO NOT STOP LOCATION SERVICES!
+    // Background location service must continue for:
+    // - Customer real-time tracking
+    // - Ably location broadcasting
+    // - Driver navigation with external apps (Google Maps/Waze)
+    
+    print('✅ Navigation manager: App paused, background services continue');
+    // Only save UI state, don't stop any tracking services
   }
   
   void _handleAppDetached() {
     // App is being terminated
-    // Save critical state
+    // Save critical navigation state
+    print('⚠️ Navigation manager: App detaching, saving state');
   }
 
   @override

@@ -1,18 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'core/supabase_config.dart';
 import 'core/mapbox_config.dart';
 import 'screens/auth_wrapper.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/main_map_screen.dart';
-import 'screens/active_delivery_screen.dart';
 import 'services/background_location_service.dart';
 import 'screens/delivery_debug_screen.dart';
 import 'screens/debug_vehicle_types_screen.dart';
 import 'services/auth_service.dart';
 import 'services/driver_flow_service.dart';
+import 'services/ably_service.dart';
 import 'models/driver.dart';
 import 'models/delivery.dart';
 import 'screens/improved_delivery_offers_screen.dart';
@@ -27,6 +28,15 @@ import 'services/optimized_state_manager.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  // Load environment variables
+  try {
+    await dotenv.load(fileName: ".env");
+    print('✅ Environment variables loaded');
+  } catch (e) {
+    print('⚠️ Failed to load .env file: $e');
+    print('⚠️ Ably features will not be available');
+  }
+  
   // Initialize Supabase
   await Supabase.initialize(
     url: SupabaseConfig.supabaseUrl,
@@ -35,6 +45,21 @@ void main() async {
   
   // Initialize Mapbox
   MapboxOptions.setAccessToken(MapboxConfig.accessToken);
+  
+  // Initialize Ably (if API key available)
+  try {
+    final ablyKey = dotenv.env['ABLY_CLIENT_KEY'];
+    if (ablyKey != null && ablyKey.isNotEmpty) {
+      await AblyService().initialize(ablyKey);
+      print('✅ Ably service initialized');
+    } else {
+      print('⚠️ ABLY_CLIENT_KEY not found in .env file');
+      print('⚠️ Ably real-time tracking will not be available');
+    }
+  } catch (e) {
+    print('⚠️ Ably initialization failed: $e');
+    print('⚠️ App will continue with Supabase tracking only');
+  }
   
   // Initialize state managers
   try {
@@ -121,18 +146,6 @@ class MyApp extends StatelessWidget {
         '/signup': (context) => const SignupScreen(),
         '/dashboard': (context) => const DriverDashboard(),
         '/map': (context) => const MainMapScreen(),
-      },
-      onGenerateRoute: (settings) {
-        // Handle routes with arguments
-        if (settings.name == '/active-delivery') {
-          final delivery = settings.arguments as Delivery?;
-          if (delivery != null) {
-            return MaterialPageRoute(
-              builder: (context) => ActiveDeliveryScreen(delivery: delivery),
-            );
-          }
-        }
-        return null;
       },
       debugShowCheckedModeBanner: false,
     );

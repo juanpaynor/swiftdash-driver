@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
 import '../core/supabase_config.dart';
-import '../core/app_assets.dart';
 import '../services/auth_service.dart';
 import '../services/optimized_state_manager.dart';
 import '../widgets/optimized_state_widgets.dart';
 import 'signup_screen.dart';
-import 'database_test_screen.dart';
-import 'database_diagnostics_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -111,31 +108,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-        backgroundColor: SwiftDashColors.backgroundGrey,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        actions: [
-          IconButton(
-            icon: Icon(Icons.bug_report, color: SwiftDashColors.darkBlue),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => const DatabaseTestScreen()),
-              );
-            },
-            tooltip: 'Database Test',
-          ),
-          IconButton(
-            icon: Icon(Icons.medical_services, color: SwiftDashColors.warningOrange),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => const DatabaseDiagnosticsScreen()),
-              );
-            },
-            tooltip: 'Database Diagnostics',
-          ),
-        ],
-      ),
+      backgroundColor: SwiftDashColors.white,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -144,82 +117,76 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const SizedBox(height: 60),
+                const SizedBox(height: 40),
                 
-                // Logo and Title
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: SwiftDashColors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: SwiftDashColors.darkBlue.withOpacity(0.1),
-                        blurRadius: 20,
-                        offset: const Offset(0, 10),
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 120,
-                        height: 120,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: SwiftDashColors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: [
-                            BoxShadow(
-                              color: SwiftDashColors.darkBlue.withOpacity(0.1),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
+                // Logo
+                Center(
+                  child: Container(
+                    width: 140,
+                    height: 140,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: SwiftDashColors.lightBlue.withOpacity(0.1),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: Image.asset(
+                        'assets/images/logos/Swiftdash_Driver.png',
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(20),
                             ),
-                          ],
-                        ),
-                        child: Image.asset(
-                          AppAssets.logo,
-                          fit: BoxFit.contain,
-                          errorBuilder: (context, error, stackTrace) {
-                            // Fallback to icon if image not found
-                            return Container(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: const Icon(
-                                Icons.local_shipping,
-                                color: SwiftDashColors.white,
-                                size: 40,
-                              ),
-                            );
-                          },
-                        ),
+                            child: const Icon(
+                              Icons.local_shipping_rounded,
+                              color: SwiftDashColors.white,
+                              size: 60,
+                            ),
+                          );
+                        },
                       ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'SwiftDash Driver',
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          color: SwiftDashColors.darkBlue,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Sign in to start delivering',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: SwiftDashColors.textGrey,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
                 
-                const SizedBox(height: 40),
+                const SizedBox(height: 32),
+                
+                // Title
+                Text(
+                  'SwiftDash Driver',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    foreground: Paint()
+                      ..shader = LinearGradient(
+                        colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
+                      ).createShader(const Rect.fromLTWH(0.0, 0.0, 200.0, 70.0)),
+                  ),
+                ),
+                
+                const SizedBox(height: 8),
+                
+                Text(
+                  'Sign in to start delivering',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: SwiftDashColors.textGrey,
+                  ),
+                ),
+                
+                const SizedBox(height: 48),
                 
                 // Email Field
                 Container(

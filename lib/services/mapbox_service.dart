@@ -48,6 +48,16 @@ class MapboxService {
     }
   }
 
+  /// Alias method for enhanced active delivery screen
+  static Future<RouteData?> getRouteData({
+    required double startLat,
+    required double startLng,
+    required double endLat,
+    required double endLng,
+  }) async {
+    return await getRoute(startLat, startLng, endLat, endLng);
+  }
+
   /// Get a static map image URL centered between two points with pickup/delivery markers and route
   static String getStaticPreviewUrl({
     required double pickupLat,

@@ -46,6 +46,16 @@ dependencies:
   flutter_background_service: ^5.0.5
   flutter_local_notifications: ^17.2.1
   device_info_plus: ^10.1.0
+  
+  # Ably Pub/Sub for real-time location tracking
+  ably_flutter: ^1.2.35
+  battery_plus: ^5.0.2
+  flutter_dotenv: ^5.1.0
+  intl: ^0.19.0
+  
+  # Phase 3: Delight animations
+  confetti: ^0.7.0
+  animated_text_kit: ^4.2.2
 
 dev_dependencies:
   flutter_test:
@@ -76,6 +86,7 @@ flutter:
     - assets/images/
     - assets/images/logos/
     - assets/images/icons/
+    - .env
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

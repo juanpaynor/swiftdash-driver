@@ -1,4 +1,5 @@
 import 'cash_remittance.dart';
+import 'delivery_stop.dart';
 
 class Delivery {
   final String id;
@@ -9,6 +10,16 @@ class Delivery {
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? completedAt;
+  
+  // Multi-stop support
+  final bool isMultiStop;
+  final int totalStops;
+  final int currentStopIndex;
+  final List<DeliveryStop>? stops; // Populated separately via service
+  
+  // Scheduled delivery support
+  final bool isScheduled;
+  final DateTime? scheduledPickupTime;
   
   // Pickup Information
   final String pickupAddress;
@@ -42,6 +53,7 @@ class Delivery {
   
   // Proof of Delivery
   final String? proofPhotoUrl;
+  final String? pickupProofPhotoUrl; // NEW: Photo taken at pickup
   final String? recipientName;
   final String? deliveryNotes;
   final String? signatureData;
@@ -63,6 +75,12 @@ class Delivery {
     required this.createdAt,
     required this.updatedAt,
     this.completedAt,
+    this.isMultiStop = false,
+    this.totalStops = 0,
+    this.currentStopIndex = 0,
+    this.stops,
+    this.isScheduled = false,
+    this.scheduledPickupTime,
     required this.pickupAddress,
     required this.pickupLatitude,
     required this.pickupLongitude,
@@ -84,6 +102,7 @@ class Delivery {
     this.customerRating,
     this.driverRating,
     this.proofPhotoUrl,
+    this.pickupProofPhotoUrl,
     this.recipientName,
     this.deliveryNotes,
     this.signatureData,
@@ -149,27 +168,31 @@ class Delivery {
   static DeliveryStatus _parseDeliveryStatus(String? statusString) {
     if (statusString == null) return DeliveryStatus.pending;
     
-    // Handle database field name to enum mapping
+    // ✅ CONFIRMED with Customer App Team on Oct 21, 2025
+    // See: RESPONSE_TO_DRIVER_APP_TEAM.md for official status values
+    // Database uses snake_case past tense: 'pickup_arrived', 'package_collected', 'in_transit'
     final statusMap = {
       'pending': DeliveryStatus.pending,
-      'driver_offered': DeliveryStatus.driverOffered, // Map database field to enum
-      'driverOffered': DeliveryStatus.driverOffered,  // Also handle camelCase
+      'driver_offered': DeliveryStatus.driverOffered,
+      'driverOffered': DeliveryStatus.driverOffered,
       'driver_assigned': DeliveryStatus.driverAssigned,
       'driverAssigned': DeliveryStatus.driverAssigned,
-      'going_to_pickup': DeliveryStatus.goingToPickup, // NEW status
-      'goingToPickup': DeliveryStatus.goingToPickup,   // camelCase version
-      'pickup_arrived': DeliveryStatus.pickupArrived,
+      'going_to_pickup': DeliveryStatus.goingToPickup,
+      'goingToPickup': DeliveryStatus.goingToPickup,
+      'pickup_arrived': DeliveryStatus.pickupArrived,  // ✅ CORRECT per customer app
       'pickupArrived': DeliveryStatus.pickupArrived,
-      'at_pickup': DeliveryStatus.pickupArrived,       // Backend uses at_pickup
-      'atPickup': DeliveryStatus.pickupArrived,        // camelCase version
-      'package_collected': DeliveryStatus.packageCollected,
+      'at_pickup': DeliveryStatus.pickupArrived,       // ❌ LEGACY - map to correct enum
+      'atPickup': DeliveryStatus.pickupArrived,
+      'package_collected': DeliveryStatus.packageCollected,  // ✅ CORRECT per customer app
       'packageCollected': DeliveryStatus.packageCollected,
-      'going_to_destination': DeliveryStatus.goingToDestination, // NEW status
-      'goingToDestination': DeliveryStatus.goingToDestination,   // camelCase version
-      'in_transit': DeliveryStatus.goingToDestination,           // Map old to new
-      'inTransit': DeliveryStatus.goingToDestination,            // camelCase version
-      'at_destination': DeliveryStatus.atDestination,            // NEW status
-      'atDestination': DeliveryStatus.atDestination,             // camelCase version
+      'picked_up': DeliveryStatus.packageCollected,    // ❌ LEGACY - map to correct enum
+      'pickedUp': DeliveryStatus.packageCollected,
+      'going_to_destination': DeliveryStatus.goingToDestination,
+      'goingToDestination': DeliveryStatus.goingToDestination,
+      'in_transit': DeliveryStatus.goingToDestination, // ✅ CORRECT per customer app
+      'inTransit': DeliveryStatus.goingToDestination,
+      'at_destination': DeliveryStatus.atDestination,
+      'atDestination': DeliveryStatus.atDestination,
       'delivered': DeliveryStatus.delivered,
       'cancelled': DeliveryStatus.cancelled,
       'failed': DeliveryStatus.failed,
@@ -202,6 +225,14 @@ class Delivery {
       createdAt: json['created_at'] != null ? DateTime.parse(json['created_at']) : DateTime.parse(json['updated_at']), // fallback to updated_at if created_at is missing
       updatedAt: DateTime.parse(json['updated_at']),
       completedAt: json['completed_at'] != null ? DateTime.parse(json['completed_at']) : null,
+      isMultiStop: json['is_multi_stop'] ?? false,
+      totalStops: json['total_stops'] ?? 0,
+      currentStopIndex: json['current_stop_index'] ?? 0,
+      stops: null, // Populated separately via DeliveryStopService
+      isScheduled: json['is_scheduled'] ?? false,
+      scheduledPickupTime: json['scheduled_pickup_time'] != null 
+          ? DateTime.parse(json['scheduled_pickup_time']) 
+          : null,
       pickupAddress: json['pickup_address'] ?? '',
       pickupLatitude: json['pickup_latitude']?.toDouble() ?? 0.0,
       pickupLongitude: json['pickup_longitude']?.toDouble() ?? 0.0,
@@ -223,6 +254,7 @@ class Delivery {
       customerRating: json['customer_rating'] != null ? int.tryParse(json['customer_rating'].toString()) : null,
       driverRating: json['driver_rating'] != null ? int.tryParse(json['driver_rating'].toString()) : null, 
       proofPhotoUrl: json['proof_photo_url'] ?? '',
+      pickupProofPhotoUrl: json['pickup_proof_photo_url'] ?? '',
       recipientName: json['recipient_name'] ?? '',
       deliveryNotes: json['delivery_notes'] ?? '',
       signatureData: json['signature_data'] ?? '',
@@ -251,6 +283,11 @@ class Delivery {
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
       'completed_at': completedAt?.toIso8601String(),
+      'is_multi_stop': isMultiStop,
+      'total_stops': totalStops,
+      'current_stop_index': currentStopIndex,
+      'is_scheduled': isScheduled,
+      'scheduled_pickup_time': scheduledPickupTime?.toIso8601String(),
       'pickup_address': pickupAddress,
       'pickup_latitude': pickupLatitude,
       'pickup_longitude': pickupLongitude,
@@ -272,6 +309,7 @@ class Delivery {
       'customer_rating': customerRating,
       'driver_rating': driverRating,
       'proof_photo_url': proofPhotoUrl,
+      'pickup_proof_photo_url': pickupProofPhotoUrl,
       'recipient_name': recipientName,
       'delivery_notes': deliveryNotes,
       'signature_data': signatureData,
@@ -294,6 +332,12 @@ class Delivery {
     DateTime? createdAt,
     DateTime? updatedAt,
     DateTime? completedAt,
+    bool? isMultiStop,
+    int? totalStops,
+    int? currentStopIndex,
+    List<DeliveryStop>? stops,
+    bool? isScheduled,
+    DateTime? scheduledPickupTime,
     String? pickupAddress,
     double? pickupLatitude,
     double? pickupLongitude,
@@ -315,6 +359,7 @@ class Delivery {
     int? customerRating,
     int? driverRating,
     String? proofPhotoUrl,
+    String? pickupProofPhotoUrl,
     String? recipientName,
     String? deliveryNotes,
     String? signatureData,
@@ -328,6 +373,12 @@ class Delivery {
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       completedAt: completedAt ?? this.completedAt,
+      isMultiStop: isMultiStop ?? this.isMultiStop,
+      totalStops: totalStops ?? this.totalStops,
+      currentStopIndex: currentStopIndex ?? this.currentStopIndex,
+      stops: stops ?? this.stops,
+      isScheduled: isScheduled ?? this.isScheduled,
+      scheduledPickupTime: scheduledPickupTime ?? this.scheduledPickupTime,
       pickupAddress: pickupAddress ?? this.pickupAddress,
       pickupLatitude: pickupLatitude ?? this.pickupLatitude,
       pickupLongitude: pickupLongitude ?? this.pickupLongitude,
@@ -349,6 +400,7 @@ class Delivery {
       customerRating: customerRating ?? this.customerRating,
       driverRating: driverRating ?? this.driverRating,
       proofPhotoUrl: proofPhotoUrl ?? this.proofPhotoUrl,
+      pickupProofPhotoUrl: pickupProofPhotoUrl ?? this.pickupProofPhotoUrl,
       recipientName: recipientName ?? this.recipientName,
       deliveryNotes: deliveryNotes ?? this.deliveryNotes,
       signatureData: signatureData ?? this.signatureData,
@@ -371,6 +423,36 @@ enum DeliveryStatus {
 }
 
 extension DeliveryStatusExtension on DeliveryStatus {
+  /// Get database-compatible snake_case value for status updates
+  /// ✅ CONFIRMED with Customer App Team on Oct 21, 2025
+  /// See: RESPONSE_TO_DRIVER_APP_TEAM.md
+  String get databaseValue {
+    switch (this) {
+      case DeliveryStatus.pending:
+        return 'pending';
+      case DeliveryStatus.driverOffered:
+        return 'driver_offered';
+      case DeliveryStatus.driverAssigned:
+        return 'driver_assigned';
+      case DeliveryStatus.goingToPickup:
+        return 'going_to_pickup';  // Optional status
+      case DeliveryStatus.pickupArrived:
+        return 'pickup_arrived';  // ✅ CORRECT per customer app (NOT 'at_pickup')
+      case DeliveryStatus.packageCollected:
+        return 'package_collected';  // ✅ CORRECT per customer app (NOT 'picked_up')
+      case DeliveryStatus.goingToDestination:
+        return 'in_transit';  // ✅ CORRECT per customer app
+      case DeliveryStatus.atDestination:
+        return 'at_destination';  // ✅ Customer app expects this value
+      case DeliveryStatus.delivered:
+        return 'delivered';
+      case DeliveryStatus.cancelled:
+        return 'cancelled';
+      case DeliveryStatus.failed:
+        return 'failed';
+    }
+  }
+  
   String get displayName {
     switch (this) {
       case DeliveryStatus.pending:

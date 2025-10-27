@@ -20,12 +20,12 @@ class OptimizedRealtimeService {
   // Channel management
   final Map<String, RealtimeChannel> _activeChannels = {};
   
-  // Stream controllers for real-time data
-  final _newDeliveriesController = StreamController<Delivery>.broadcast();
-  final _deliveryUpdatesController = StreamController<Delivery>.broadcast();
-  final _driverStatusController = StreamController<Map<String, dynamic>>.broadcast();
-  final _offerModalController = StreamController<Delivery>.broadcast();
-  final _locationUpdatesController = StreamController<Map<String, dynamic>>.broadcast();
+  // Stream controllers for real-time data (don't close in singleton!)
+  late final _newDeliveriesController = StreamController<Delivery>.broadcast();
+  late final _deliveryUpdatesController = StreamController<Delivery>.broadcast();
+  late final _driverStatusController = StreamController<Map<String, dynamic>>.broadcast();
+  late final _offerModalController = StreamController<Delivery>.broadcast();
+  late final _locationUpdatesController = StreamController<Map<String, dynamic>>.broadcast();
   
   // Public streams
   Stream<Delivery> get newDeliveries => _newDeliveriesController.stream;
@@ -82,6 +82,22 @@ class OptimizedRealtimeService {
       callback: (payload) => _handleNewDeliveryOffer(payload),
     );
     
+    // ALSO listen for any delivery updates for this driver (broader filter for debugging)
+    channel.onPostgresChanges(
+      event: PostgresChangeEvent.all,
+      schema: 'public', 
+      table: 'deliveries',
+      callback: (payload) {
+        print('🔍 DEBUGGING: Any delivery update received for driver $driverId');
+        print('🔍 Event: ${payload.eventType}');
+        print('🔍 New record driver_id: ${payload.newRecord['driver_id']}');
+        print('🔍 New record status: ${payload.newRecord['status']}');
+        if (payload.newRecord['driver_id'] == driverId) {
+          print('🎯 This update is for current driver!');
+        }
+      },
+    );
+    
     await channel.subscribe();
     _activeChannels[channelName] = channel;
     
@@ -118,21 +134,13 @@ class OptimizedRealtimeService {
 
   // 🔹 2. GPS LOCATION BROADCASTING (NON-PERSISTENT)
   
-  /// Start broadcasting driver location (WebSocket + GPS tracking)
+  /// Start broadcasting driver location (ABLY ONLY - Supabase WebSocket disabled)
+  /// ✅ OPTIMIZED: Customer app uses Ably 'tracking:{deliveryId}', not Supabase channels
   Future<void> startLocationBroadcast(String deliveryId) async {
-    final channelName = 'driver-location-$deliveryId';
+    print('📍 Starting GPS location tracking for delivery: $deliveryId');
     
-    if (_activeChannels.containsKey(channelName)) {
-      print('📍 Location broadcast already active for delivery: $deliveryId');
-      return;
-    }
-    
-    // Start WebSocket channel for broadcasting
-    final channel = _supabase.channel(channelName);
-    await channel.subscribe();
-    _activeChannels[channelName] = channel;
-    
-    // Start actual GPS location tracking
+    // ✅ FIX: Only start Ably location tracking (via DriverLocationService)
+    // Supabase WebSocket channels are NOT used by customer app - disabled to save resources
     final driverId = _currentDriverId ?? _authUserId;
     if (driverId != null) {
       try {
@@ -141,18 +149,18 @@ class OptimizedRealtimeService {
           driverId: driverId,
           deliveryId: deliveryId,
         );
-        print('🎯 Started GPS location tracking for delivery: $deliveryId');
+        print('✅ GPS location tracking started (Ably only) for delivery: $deliveryId');
       } catch (e) {
         print('❌ Failed to start GPS tracking: $e');
       }
     } else {
       print('⚠️ Cannot start GPS tracking: driver ID not available');
     }
-    
-    print('📍 Started location broadcast (WebSocket + GPS tracking) for delivery: $deliveryId');
   }
   
-  /// Broadcast current location (temporary, not stored in DB)
+  /// Broadcast current location (DEPRECATED - now handled by Ably only)
+  /// ✅ OPTIMIZED: This method kept for backward compatibility but does nothing
+  /// Location is now broadcast via DriverLocationService → Ably 'tracking:{deliveryId}'
   Future<void> broadcastLocation({
     required String deliveryId,
     required double latitude,
@@ -162,67 +170,27 @@ class OptimizedRealtimeService {
     double? accuracy,
     double? batteryLevel,
   }) async {
-    final channelName = 'driver-location-$deliveryId';
-    final channel = _activeChannels[channelName];
+    // ✅ FIX: Supabase WebSocket broadcasting disabled - customer app uses Ably
+    // Location is already being broadcast by OptimizedLocationService → Ably
+    // This method is kept for backward compatibility but does nothing
     
-    if (channel == null) {
-      print('⚠️ No location broadcast channel for delivery: $deliveryId');
-      return;
-    }
-    
-    final locationData = {
-      'driver_id': _currentDriverId,
-      'delivery_id': deliveryId,
-      'latitude': latitude,
-      'longitude': longitude,
-      'speed_kmh': speedKmH,
-      'heading': heading,
-      'battery_level': batteryLevel ?? 100.0, // Default to 100% if not provided
-      'timestamp': DateTime.now().toIso8601String(),
-    };
-    
-    // 🔥 BROADCAST VIA WEBSOCKET - This is the key optimization!
-    try {
-      await channel.sendBroadcastMessage(
-        event: 'location_update',
-        payload: locationData,
-      );
-      print('📡 Location broadcasted via websocket for delivery: $deliveryId');
-    } catch (e) {
-      print('❌ Failed to broadcast location: $e');
-    }
-    
-    // Emit locally so app components can react immediately
-    _locationUpdatesController.add(locationData);
-
     // Optional: Update driver current status table (lightweight)
     await _updateDriverCurrentStatus(latitude, longitude, speedKmH);
   }
 
-  /// Subscribe to driver location broadcasts (for customers)
+  /// Check if WebSocket broadcasting is healthy (DEPRECATED)
+  /// ✅ OPTIMIZED: Always returns true since we use Ably now
+  bool isWebSocketHealthy(String deliveryId) {
+    // Supabase WebSocket no longer used - return true for backward compatibility
+    return true;
+  }
+
+  /// Subscribe to driver location broadcasts (DEPRECATED - for customers)
+  /// ✅ OPTIMIZED: Customer app should use Ably 'tracking:{deliveryId}' instead
   Future<void> subscribeToDriverLocation(String deliveryId) async {
-    final channelName = 'driver-location-$deliveryId';
-    
-    if (_activeChannels.containsKey(channelName)) {
-      print('📍 Already subscribed to location for delivery: $deliveryId');
-      return;
-    }
-    
-    final channel = _supabase.channel(channelName);
-    
-    // Listen for location broadcasts
-    channel.onBroadcast(
-      event: 'location_update',
-      callback: (payload) {
-        print('📍 Received driver location update: $payload');
-        _locationUpdatesController.add(payload);
-      },
-    );
-    
-    await channel.subscribe();
-    _activeChannels[channelName] = channel;
-    
-    print('📍 Subscribed to driver location broadcasts for delivery: $deliveryId');
+    print('⚠️ subscribeToDriverLocation called but Supabase WebSocket is disabled');
+    print('⚠️ Customer app should use Ably channel: tracking:$deliveryId');
+    // Do nothing - customer app should use Ably
   }
 
   /// Store location only for important events (pickup, delivery, etc.)
@@ -271,7 +239,9 @@ class OptimizedRealtimeService {
         case DeliveryStatus.driverAssigned:
           // Start tracking this specific delivery
           subscribeToSpecificDelivery(delivery.id);
-          startLocationBroadcast(delivery.id); // Fire and forget for async
+          // ✅ FIX: Don't start location here - DriverFlowService handles it
+          // Location tracking started by DriverFlowService.acceptDeliveryOffer()
+          print('📍 Skipping location broadcast - handled by DriverFlowService');
           break;
         case DeliveryStatus.delivered:
           // Stop location broadcast for completed delivery
@@ -442,16 +412,17 @@ class OptimizedRealtimeService {
       print('📋 Updating delivery status: $deliveryId -> $status');
       
       final updateData = {
-        'status': status,
+        'status': status,  // ✅ Already snake_case from .databaseValue
         'updated_at': DateTime.now().toIso8601String(),
       };
       
-      // Add timestamp fields based on status
+      // Add timestamp fields based on status (using snake_case)
       switch (status) {
-        case 'package_collected':
+        case 'picked_up':  // ✅ Match customer app expectations
+        case 'package_collected':  // Legacy support
           updateData['picked_up_at'] = DateTime.now().toIso8601String();
           break;
-        case 'in_transit':
+        case 'in_transit':  // ✅ Match customer app expectations
           updateData['in_transit_at'] = DateTime.now().toIso8601String();
           break;
         case 'delivered':
@@ -530,22 +501,20 @@ class OptimizedRealtimeService {
     }
   }
   
+  /// Stop location broadcast (OPTIMIZED - only stops GPS tracking, no WebSocket cleanup needed)
   Future<void> _stopLocationBroadcast(String deliveryId) async {
-    final channelName = 'driver-location-$deliveryId';
-    await _unsubscribeFromChannel(channelName);
+    // ✅ FIX: No Supabase WebSocket channel to unsubscribe from - only stop GPS tracking
     
     // Stop GPS location tracking
     try {
       final locationService = OptimizedLocationService();
       if (locationService.currentDeliveryId == deliveryId) {
         await locationService.stopTracking();
-        print('🎯 Stopped GPS location tracking for delivery: $deliveryId');
+        print('✅ Stopped GPS location tracking for delivery: $deliveryId');
       }
     } catch (e) {
       print('❌ Failed to stop GPS tracking: $e');
     }
-    
-    print('📍 Stopped location broadcast (WebSocket + GPS tracking) for delivery: $deliveryId');
   }
 
   // 🔹 7. LEGACY METHODS (Updated)
@@ -591,7 +560,13 @@ class OptimizedRealtimeService {
           .from('deliveries')
           .select('*')
           .eq('driver_id', driverId)
-          .inFilter('status', ['driver_assigned', 'package_collected', 'in_transit'])
+          .inFilter('status', [
+            'driver_assigned',
+            'pickup_arrived',      // ✅ FIX: Include arrival at pickup
+            'package_collected',
+            'in_transit',
+            'at_destination',      // ✅ FIX: Include arrival at delivery (though customer app uses in_transit)
+          ])
           .order('created_at', ascending: true);
       
       return (response as List)
@@ -634,17 +609,39 @@ class OptimizedRealtimeService {
     showDialog(
       context: context,
       barrierDismissible: false,
-      useSafeArea: false,
+      useSafeArea: true,  // ✅ FIX: Prevent parent screen widgets from bleeding through
       builder: (context) => ImprovedDeliveryOfferModal(
         delivery: delivery,
         onAccept: () async {
-          // call parent accept callback which returns true on success
-          final ok = await onAccept(delivery.id, driverId);
-          if (ok) {
-            // close the modal when accept succeeded
-            if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+          try {
+            print('🎯 Modal onAccept called - starting acceptance flow');
+            // call parent accept callback which returns true on success
+            final ok = await onAccept(delivery.id, driverId);
+            
+            if (ok) {
+              print('✅ Acceptance successful - closing modal and navigating');
+              // close the modal when accept succeeded
+              if (Navigator.of(context).canPop()) {
+                Navigator.of(context).pop();
+                
+                // Navigate to active delivery screen after a brief delay
+                Future.delayed(const Duration(milliseconds: 300), () {
+                  if (Navigator.of(context).mounted) {
+                    Navigator.of(context).pushReplacementNamed(
+                      '/active-delivery',
+                      arguments: delivery,
+                    );
+                  }
+                });
+              }
+            } else {
+              print('❌ Acceptance failed - offer may have been taken');
+            }
+            return ok;
+          } catch (e) {
+            print('❌ Error in modal onAccept: $e');
+            return false;
           }
-          return ok;
         },
         onDecline: () async {
           // call parent decline callback if provided
@@ -722,8 +719,10 @@ class OptimizedRealtimeService {
         // Subscribe to specific delivery updates
         await subscribeToSpecificDelivery(deliveryId);
         
-        // Start location broadcasting for this delivery
-        await startLocationBroadcast(deliveryId);
+        // ✅ FIX: Don't start location here - DriverFlowService handles it
+        // Location tracking is started by DriverFlowService.acceptDeliveryOffer()
+        // to avoid duplicate location services fighting each other
+        print('📍 Location tracking will be started by DriverFlowService');
         
         return true;
       } else {
@@ -796,14 +795,10 @@ class OptimizedRealtimeService {
       // Cancel any active offer timer
       _offerTimeoutTimer?.cancel();
       
-      // Close stream controllers
-      await _newDeliveriesController.close();
-      await _deliveryUpdatesController.close();
-      await _driverStatusController.close();
-      await _offerModalController.close();
-      await _locationUpdatesController.close();
-      
-      print('🧹 Optimized realtime service disposed');
+      // 🚨 DON'T CLOSE STREAM CONTROLLERS IN SINGLETON!
+      // They need to persist for the lifetime of the app
+      // Closing them prevents listeners from receiving future events
+      print('🧹 Optimized realtime service channels unsubscribed (stream controllers kept alive)');
     } catch (e) {
       print('❌ Error disposing realtime service: $e');
     }

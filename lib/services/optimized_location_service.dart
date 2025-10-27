@@ -11,13 +11,25 @@ class OptimizedLocationService {
   final OptimizedRealtimeService _realtimeService = OptimizedRealtimeService();
   
   StreamSubscription<Position>? _positionSubscription;
+  StreamSubscription<Position>? _idleListenerSubscription;
   Timer? _broadcastTimer;
+  Timer? _fallbackTimer;
+  Timer? _healthCheckTimer;
   
   String? _currentDeliveryId;
   bool _isTracking = false;
   
   Position? _lastPosition;
   DateTime? _lastBroadcastTime;
+  
+  // Callback for idle location listening
+  Function(Position)? _idleLocationCallback;
+  
+  // Circuit breaker for WebSocket errors
+  int _consecutiveWebSocketErrors = 0;
+  DateTime? _lastWebSocketErrorTime;
+  static const int _maxConsecutiveErrors = 3;
+  static const Duration _errorCooldown = Duration(minutes: 2);
 
   // 🔹 ADAPTIVE LOCATION FREQUENCY SYSTEM
 
@@ -43,22 +55,20 @@ class OptimizedLocationService {
     // Start foreground location stream
     await _startLocationStream();
     
-    // Start location broadcast for this delivery
-    _realtimeService.startLocationBroadcast(deliveryId);
+    // ✅ FIX: Don't call startLocationBroadcast() - creates infinite loop
+    // Location broadcasting is now handled by DriverLocationService (Ably only)
+    // This service is DEPRECATED and should not be used
+    print('⚠️ OptimizedLocationService is deprecated - use DriverLocationService instead');
 
-    // Start background service for when app is minimized (with fallback)
-    try {
-      await BackgroundLocationService.startLocationTracking(
-        driverId: driverId,
-        deliveryId: deliveryId,
-      );
-      print('✅ Background location service started');
-    } catch (e) {
-      print('⚠️ Failed to start background service, using foreground-only mode: $e');
-      // Continue with foreground-only tracking
-    }
+    // 🚫 Background service temporarily disabled due to notification crash issues
+    // The background service is causing local notification crashes due to missing icon resources
+    // TODO: Fix notification configuration and re-enable
+    print('⚠️ Background location service temporarily disabled - using foreground-only tracking');
 
-    print('✅ Adaptive location tracking started (foreground + background)');
+    // Start WebSocket health check timer
+    _startHealthCheck();
+
+    print('✅ Adaptive location tracking started (foreground + background + health check)');
   }
 
   /// Stop location tracking
@@ -72,6 +82,9 @@ class OptimizedLocationService {
     
     _broadcastTimer?.cancel();
     _broadcastTimer = null;
+    
+    // Stop fallback timer if running
+    _stopFallbackLocationPolling();
 
     // Stop background service (with error handling)
     try {
@@ -81,12 +94,37 @@ class OptimizedLocationService {
       // Continue anyway
     }
 
+    _fallbackTimer?.cancel();
+    _healthCheckTimer?.cancel();
     _isTracking = false;
     _currentDeliveryId = null;
     _lastPosition = null;
     _lastBroadcastTime = null;
 
-    print('✅ Location tracking stopped (foreground + background)');
+    print('✅ Location tracking stopped (foreground + background + health check)');
+  }
+
+  /// Start WebSocket health check timer
+  void _startHealthCheck() {
+    _healthCheckTimer?.cancel();
+    
+    // 🚫 DISABLED: Health check creates infinite loop by calling startLocationBroadcast
+    // This service is deprecated - DriverLocationService handles all location tracking
+    print('⚠️ Health check disabled - OptimizedLocationService is deprecated');
+    
+    // Check WebSocket health every 30 seconds
+    // _healthCheckTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+    //   if (_currentDeliveryId != null) {
+    //     if (!_realtimeService.isWebSocketHealthy(_currentDeliveryId!)) {
+    //       print('🔄 WebSocket unhealthy, attempting recovery...');
+    //       _realtimeService.startLocationBroadcast(_currentDeliveryId!).catchError((e) {
+    //         print('❌ Failed to recover WebSocket: $e');
+    //       });
+    //     } else {
+    //       print('✅ WebSocket health check: OK');
+    //     }
+    //   }
+    // });
   }
 
   /// Check and request location permissions
@@ -116,17 +154,50 @@ class OptimizedLocationService {
 
   /// Start location stream with adaptive settings
   Future<void> _startLocationStream() async {
-    const locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 5, // Only update if moved 5 meters
-    );
+    try {
+      const locationSettings = LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5, // Only update if moved 5 meters
+      );
 
-    _positionSubscription = Geolocator.getPositionStream(
-      locationSettings: locationSettings,
-    ).listen(
-      _handleLocationUpdate,
-      onError: (error) => print('❌ Location stream error: $error'),
-    );
+      _positionSubscription = Geolocator.getPositionStream(
+        locationSettings: locationSettings,
+      ).listen(
+        _handleLocationUpdate,
+        onError: (error) {
+          print('❌ Location stream error: $error');
+          // Try to restart stream after error with delay
+          if (_isTracking) {
+            print('🔄 Restarting location stream in 5 seconds...');
+            Timer(Duration(seconds: 5), () {
+              if (_isTracking) {
+                _startLocationStream();
+              }
+            });
+          }
+        },
+        onDone: () {
+          print('📍 Location stream completed');
+          // Restart stream if tracking is still active
+          if (_isTracking) {
+            print('🔄 Restarting location stream...');
+            _startLocationStream();
+          }
+        },
+      );
+      
+      print('📍 Location stream started successfully');
+      
+    } catch (e) {
+      print('❌ CRITICAL: Failed to start location stream: $e');
+      print('🛡️ This may be due to Android system location service failure');
+      
+      // Try fallback approach - get location periodically instead of stream
+      if (_isTracking) {
+        print('🔄 Trying fallback location polling...');
+        _startFallbackLocationPolling();
+      }
+    }
   }
 
   /// Handle location updates with adaptive broadcasting
@@ -161,16 +232,16 @@ class OptimizedLocationService {
 
   /// Get adaptive update interval based on speed and activity
   Duration _getUpdateInterval(double speedKmH) {
-    // During active delivery
+    // During active delivery - REAL-TIME UPDATES for customer tracking
     if (_currentDeliveryId != null) {
       if (speedKmH > 50) {
-        return const Duration(seconds: 5);   // Highway speed - frequent updates
+        return const Duration(seconds: 3);  // Highway speed - frequent updates
       } else if (speedKmH > 20) {
-        return const Duration(seconds: 10);  // City driving - normal updates
+        return const Duration(seconds: 4);  // City driving - frequent updates
       } else if (speedKmH > 5) {
-        return const Duration(seconds: 20);  // Slow movement - moderate updates
+        return const Duration(seconds: 5);  // Slow movement - moderate updates
       } else {
-        return const Duration(seconds: 60);  // Stationary - minimal updates
+        return const Duration(seconds: 10);  // Stationary - reduced updates
       }
     }
     
@@ -178,18 +249,48 @@ class OptimizedLocationService {
     return const Duration(minutes: 5);
   }
 
-  /// Broadcast location via realtime service
+  /// Broadcast location via realtime service with circuit breaker
   void _broadcastCurrentLocation(Position position, double speedKmH) {
     if (_currentDeliveryId == null) return;
 
-    _realtimeService.broadcastLocation(
-      deliveryId: _currentDeliveryId!,
-      latitude: position.latitude,
-      longitude: position.longitude,
-      speedKmH: speedKmH,
-      heading: position.heading,
-      accuracy: position.accuracy,
-    );
+    // Circuit breaker: Check if we're in error cooldown
+    if (_consecutiveWebSocketErrors >= _maxConsecutiveErrors) {
+      if (_lastWebSocketErrorTime != null) {
+        final timeSinceLastError = DateTime.now().difference(_lastWebSocketErrorTime!);
+        if (timeSinceLastError < _errorCooldown) {
+          // Still in cooldown period, skip broadcast
+          return;
+        } else {
+          // Cooldown expired, reset error counter
+          print('🔄 WebSocket error cooldown expired, resuming broadcasts');
+          _consecutiveWebSocketErrors = 0;
+          _lastWebSocketErrorTime = null;
+        }
+      }
+    }
+
+    // Check WebSocket health before broadcasting
+    if (!_realtimeService.isWebSocketHealthy(_currentDeliveryId!)) {
+      _handleWebSocketError('WebSocket unhealthy');
+      return;
+    }
+
+    try {
+      _realtimeService.broadcastLocation(
+        deliveryId: _currentDeliveryId!,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        speedKmH: speedKmH,
+        heading: position.heading,
+        accuracy: position.accuracy,
+      );
+      
+      // Reset error counter on successful broadcast
+      _consecutiveWebSocketErrors = 0;
+      
+    } catch (e) {
+      _handleWebSocketError('Broadcast failed: $e');
+    }
 
     _lastBroadcastTime = DateTime.now();
     
@@ -273,17 +374,42 @@ class OptimizedLocationService {
 
   /// Start battery-optimized location stream
   Future<void> _startLocationStreamOptimized() async {
-    const locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.medium, // Reduced accuracy for battery saving
-      distanceFilter: 10, // Only update if moved 10 meters
-    );
+    try {
+      const locationSettings = LocationSettings(
+        accuracy: LocationAccuracy.medium, // Reduced accuracy for battery saving
+        distanceFilter: 10, // Only update if moved 10 meters
+      );
 
-    _positionSubscription = Geolocator.getPositionStream(
-      locationSettings: locationSettings,
-    ).listen(
-      _handleLocationUpdate,
-      onError: (error) => print('❌ Location stream error: $error'),
-    );
+      _positionSubscription = Geolocator.getPositionStream(
+        locationSettings: locationSettings,
+      ).listen(
+        _handleLocationUpdate,
+        onError: (error) {
+          print('❌ Battery-optimized location stream error: $error');
+          // Try to restart stream after error
+          if (_isTracking) {
+            print('🔄 Restarting optimized location stream in 5 seconds...');
+            Timer(Duration(seconds: 5), () {
+              if (_isTracking) {
+                _startLocationStreamOptimized();
+              }
+            });
+          }
+        },
+      );
+      
+      print('📍 Battery-optimized location stream started successfully');
+      
+    } catch (e) {
+      print('❌ CRITICAL: Failed to start battery-optimized location stream: $e');
+      print('🛡️ This may be due to Android system location service failure');
+      
+      // Try fallback approach
+      if (_isTracking) {
+        print('🔄 Trying fallback location polling...');
+        _startFallbackLocationPolling();
+      }
+    }
   }
 
   /// Disable battery optimization (full accuracy)
@@ -303,7 +429,46 @@ class OptimizedLocationService {
   /// Dispose of all resources
   Future<void> dispose() async {
     await stopTracking();
+    stopListening();
     print('🧹 OptimizedLocationService disposed');
+  }
+
+  // 🔹 IDLE LOCATION LISTENING (for IdleLocationUpdateService)
+
+  /// Start listening to location changes (for idle drivers)
+  void startListening(Function(Position) onLocationChange) {
+    if (_idleListenerSubscription != null) {
+      print('⚠️ Location listener already active');
+      return;
+    }
+
+    _idleLocationCallback = onLocationChange;
+
+    const locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.medium, // Lower accuracy for battery saving
+      distanceFilter: 10, // Only notify if moved 10 meters
+    );
+
+    _idleListenerSubscription = Geolocator.getPositionStream(
+      locationSettings: locationSettings,
+    ).listen(
+      (position) {
+        _idleLocationCallback?.call(position);
+      },
+      onError: (error) {
+        print('❌ Idle location listener error: $error');
+      },
+    );
+
+    print('📍 Started idle location listener');
+  }
+
+  /// Stop listening to location changes
+  void stopListening() {
+    _idleListenerSubscription?.cancel();
+    _idleListenerSubscription = null;
+    _idleLocationCallback = null;
+    print('📍 Stopped idle location listener');
   }
 }
 
@@ -329,6 +494,47 @@ extension LocationServiceExtensions on OptimizedLocationService {
   Future<void> stopTrackingWithEvent(String endEvent) async {
     await storeLocationForEvent(endEvent);
     await stopTracking();
+  }
+
+  /// Fallback location polling when stream fails (due to Android system issues)
+  void _startFallbackLocationPolling() {
+    print('📍 Starting fallback location polling (every 10 seconds)');
+    
+    _fallbackTimer = Timer.periodic(Duration(seconds: 10), (timer) async {
+      if (!_isTracking) {
+        timer.cancel();
+        return;
+      }
+      
+      try {
+        final position = await getCurrentPosition();
+        if (position != null) {
+          _handleLocationUpdate(position);
+          print('📍 Fallback location obtained: ${position.latitude}, ${position.longitude}');
+        }
+      } catch (e) {
+        print('❌ Fallback location failed: $e');
+      }
+    });
+  }
+  
+  void _stopFallbackLocationPolling() {
+    _fallbackTimer?.cancel();
+    _fallbackTimer = null;
+  }
+
+  /// Handle WebSocket errors with circuit breaker logic
+  void _handleWebSocketError(String error) {
+    _consecutiveWebSocketErrors++;
+    _lastWebSocketErrorTime = DateTime.now();
+    
+    if (_consecutiveWebSocketErrors >= OptimizedLocationService._maxConsecutiveErrors) {
+      print('🔴 WebSocket circuit breaker activated after $_consecutiveWebSocketErrors errors');
+      print('   Last error: $error');
+      print('   Broadcasting paused for ${OptimizedLocationService._errorCooldown.inMinutes} minutes');
+    } else {
+      print('⚠️ WebSocket error ($_consecutiveWebSocketErrors/${OptimizedLocationService._maxConsecutiveErrors}): $error');
+    }
   }
 }
 

@@ -6,7 +6,8 @@ import '../services/auth_service.dart';
 import '../services/driver_flow_service.dart';
 import '../services/optimized_state_manager.dart';
 import '../core/supabase_config.dart';
-import '../screens/active_delivery_screen.dart';
+import '../widgets/multi_stop_indicator.dart';
+import '../widgets/scheduled_delivery_indicator.dart';
 
 class ImprovedDeliveryOffersScreen extends StatefulWidget {
   const ImprovedDeliveryOffersScreen({super.key});
@@ -412,11 +413,9 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
         elevation: 4,
         child: InkWell(
           onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => ActiveDeliveryScreen(delivery: delivery),
-              ),
-            );
+            // DEPRECATED: Navigation to EnhancedActiveDeliveryScreen removed
+            // Deliveries now shown on main_map_screen with DraggableDeliveryPanel
+            print('⚠️ Active delivery card tapped but navigation deprecated');
           },
           borderRadius: BorderRadius.circular(16),
           child: Padding(
@@ -453,8 +452,31 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
                         fontWeight: FontWeight.w500,
                       ),
                     ),
+                    const Spacer(),
+                    // Show scheduled indicator if scheduled
+                    if (delivery.isScheduled)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ScheduledDeliveryIndicator(delivery: delivery),
+                      ),
+                    // Show multi-stop indicator if multi-stop
+                    MultiStopIndicator(delivery: delivery),
                   ],
                 ),
+                
+                // Show scheduled details if applicable
+                if (delivery.isScheduled)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: ScheduledDeliveryDetailsCard(delivery: delivery),
+                  ),
+                
+                // Show multi-stop details if applicable
+                if (delivery.isMultiStop)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: MultiStopDetailsCard(delivery: delivery),
+                  ),
                 
                 const SizedBox(height: 16),
                 
@@ -730,11 +752,9 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
                     Expanded(
                       child: ElevatedButton(
                         onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => ActiveDeliveryScreen(delivery: delivery),
-                            ),
-                          );
+                          // DEPRECATED: Navigation to EnhancedActiveDeliveryScreen removed
+                          // Deliveries now shown on main_map_screen
+                          print('⚠️ View Details tapped but navigation deprecated');
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: SwiftDashColors.darkBlue,
@@ -768,11 +788,10 @@ class _ImprovedDeliveryOffersScreenState extends State<ImprovedDeliveryOffersScr
     
     final double lat = isPickupPhase ? delivery.pickupLatitude : delivery.deliveryLatitude;
     final double lng = isPickupPhase ? delivery.pickupLongitude : delivery.deliveryLongitude;
-    final String destination = '$lat,$lng';
     
-    // Quick launch Google Maps (most common)
+    // Quick launch Google Maps (most common) - standardized format
     final Uri googleMapsUri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1&destination=$destination&travelmode=driving'
+      'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving'
     );
     
     try {

@@ -107,18 +107,25 @@ class LocationService {
         timeLimit: Duration(seconds: 15),
       );
       
-      _positionSubscription = Geolocator.getPositionStream(
-        locationSettings: locationSettings,
-      ).listen(
-        (position) {
-          _currentPosition = position;
-          onLocationUpdate(position);
-        },
-        onError: (error) {
-          print('Location tracking error: $error');
-          onError?.call(error.toString());
-        },
-      );
+      try {
+        _positionSubscription = Geolocator.getPositionStream(
+          locationSettings: locationSettings,
+        ).listen(
+          (position) {
+            _currentPosition = position;
+            onLocationUpdate(position);
+          },
+          onError: (error) {
+            print('Location tracking error: $error');
+            onError?.call(error.toString());
+          },
+        );
+      } catch (e) {
+        print('❌ CRITICAL: Failed to start location stream in LocationService: $e');
+        print('🛡️ This may be due to Android system location service failure');
+        onError?.call('Location system unavailable: ${e.toString()}');
+        return;
+      }
       
       // Get initial position
       final initialPosition = await getCurrentPosition();

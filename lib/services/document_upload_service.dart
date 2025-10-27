@@ -45,12 +45,50 @@ class DocumentUploadService {
 
   // Upload proof of delivery
   Future<String?> uploadProofOfDelivery(File imageFile, String deliveryId) async {
-    final fileName = '${deliveryId}_pod_${DateTime.now().millisecondsSinceEpoch}.jpg';
-    return await _uploadToStorage(
-      imageFile: imageFile,
-      bucket: 'Proof_of_delivery',
-      fileName: fileName,
-    );
+    try {
+      print('📸 Preparing POD photo for upload...');
+      final fileName = '${deliveryId}_pod_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      
+      // Read and upload
+      final bytes = await imageFile.readAsBytes();
+      print('📦 Image size: ${(bytes.length / 1024).toStringAsFixed(2)} KB');
+      
+      final url = await _uploadToStorage(
+        imageFile: imageFile,
+        bucket: 'Proof_of_delivery',
+        fileName: fileName,
+      );
+      
+      print('✅ POD photo uploaded successfully');
+      return url;
+    } catch (e) {
+      print('❌ Error in uploadProofOfDelivery: $e');
+      rethrow;
+    }
+  }
+
+  // Upload pickup proof photo
+  Future<String?> uploadPickupProof(File imageFile, String deliveryId) async {
+    try {
+      print('📸 Preparing pickup photo for upload...');
+      final fileName = '${deliveryId}_pickup_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      
+      // Read and upload in chunks to prevent freezing
+      final bytes = await imageFile.readAsBytes();
+      print('📦 Image size: ${(bytes.length / 1024).toStringAsFixed(2)} KB');
+      
+      final url = await _uploadToStorage(
+        imageFile: imageFile,
+        bucket: 'pickup_photo',
+        fileName: fileName,
+      );
+      
+      print('✅ Pickup photo uploaded successfully');
+      return url;
+    } catch (e) {
+      print('❌ Error in uploadPickupProof: $e');
+      rethrow;
+    }
   }
 
   // Generic upload method
@@ -60,20 +98,39 @@ class DocumentUploadService {
     required String fileName,
   }) async {
     try {
+      print('⏳ Reading image file...');
       final bytes = await imageFile.readAsBytes();
+      print('✅ File read complete: ${bytes.length} bytes');
       
+      print('⏳ Uploading to bucket: $bucket...');
+      // Use upsert to overwrite existing file
       await _supabase.storage
           .from(bucket)
-          .uploadBinary(fileName, bytes);
+          .uploadBinary(
+            fileName, 
+            bytes,
+            fileOptions: const FileOptions(
+              cacheControl: '3600',
+              upsert: true,  // Overwrite if exists
+            ),
+          );
       
-      final url = _supabase.storage
+      print('✅ Upload to Supabase complete');
+      
+      // Get public URL with cache-busting
+      final baseUrl = _supabase.storage
           .from(bucket)
           .getPublicUrl(fileName);
       
-      print('Uploaded to $bucket: $fileName');
+      // Add cache-busting query parameter
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final url = '$baseUrl?t=$timestamp';
+      
+      print('✅ Public URL generated: $url');
       return url;
-    } catch (e) {
-      print('Error uploading to $bucket: $e');
+    } catch (e, stackTrace) {
+      print('❌ Error uploading to $bucket: $e');
+      print('Stack trace: $stackTrace');
       return null;
     }
   }
@@ -84,20 +141,25 @@ class DocumentUploadService {
     CameraDevice camera = CameraDevice.rear,
   }) async {
     try {
+      print('📸 Opening camera/gallery...');
       final XFile? image = await _picker.pickImage(
         source: source,
-        maxWidth: 1024,
+        maxWidth: 1024,  // Reduced from higher resolution
         maxHeight: 1024,
-        imageQuality: 85,
+        imageQuality: 75,  // Reduced from 85 to prevent large files
         preferredCameraDevice: camera,
       );
       
       if (image != null) {
-        return File(image.path);
+        final file = File(image.path);
+        final fileSize = await file.length();
+        print('✅ Image captured: ${(fileSize / 1024).toStringAsFixed(2)} KB');
+        return file;
       }
+      print('❌ No image selected');
       return null;
     } catch (e) {
-      print('Error capturing image: $e');
+      print('❌ Error capturing image: $e');
       return null;
     }
   }

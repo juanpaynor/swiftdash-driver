@@ -155,20 +155,44 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
 
       // Auto-complete slide animation and await accept result
       _slideController.forward().then((_) async {
-        setState(() {});
-        // show accepting state
+        if (!mounted) return;
+        
+        setState(() {
+          _loadingRoute = true; // Show loading state
+        });
+        
         try {
-          // indicate accepting
-          setState(() => _loadingRoute = true); // reuse loading flag as a lightweight 'busy' indicator
+          print('🎯 Starting delivery acceptance...');
           final accepted = await widget.onAccept();
+          
+          if (!mounted) return;
+          
           if (accepted) {
-            // success: modal can close itself by calling onAccept provider (which should return true)
-            // parent callback is expected to handle navigation and tracking
-            // we simply leave — parent will close the dialog if needed
+            print('✅ Delivery accepted - modal will close');
+            // Success: The parent callback should handle modal closing and navigation
+            // Add a small delay to ensure the UI updates properly
+            await Future.delayed(const Duration(milliseconds: 100));
           } else {
-            // failed to accept (taken by another driver) — reset slider
+            print('❌ Delivery acceptance failed - resetting slider');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Delivery was already taken by another driver.'),
+                  backgroundColor: SwiftDashColors.warningOrange,
+                ),
+              );
+              setState(() {
+                _slideProgress = 0.0;
+                _isSliding = false;
+              });
+              _slideController.reverse();
+            }
+          }
+        } catch (e) {
+          print('❌ Error during accept flow: $e');
+          if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Delivery was already taken by another driver.'), backgroundColor: SwiftDashColors.warningOrange),
+              SnackBar(content: Text('Failed to accept delivery: $e')),
             );
             setState(() {
               _slideProgress = 0.0;
@@ -176,16 +200,10 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
             });
             _slideController.reverse();
           }
-        } catch (e) {
-          print('Error during accept flow: $e');
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to accept delivery: $e')));
-          setState(() {
-            _slideProgress = 0.0;
-            _isSliding = false;
-          });
-          _slideController.reverse();
         } finally {
-          setState(() => _loadingRoute = false);
+          if (mounted) {
+            setState(() => _loadingRoute = false);
+          }
         }
       });
     } else if (progress < _slideThreshold && _isSliding) {
@@ -206,9 +224,11 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
     final isUrgent = _timeLeft < 60;
     
     return Material(
-      color: Colors.black54,
-      child: SafeArea(
-        child: Column(
+      type: MaterialType.transparency,
+      child: Container(
+        color: Colors.black87, // ✅ FIX: Fully opaque to block parent screen content
+        child: SafeArea(
+          child: Column(
           children: [
             // Top status bar with timer
             Container(
@@ -498,6 +518,7 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
           ],
         ),
       ),
+      ), // Container wrapper
     );
   }
   

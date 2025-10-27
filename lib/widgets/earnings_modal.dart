@@ -115,7 +115,7 @@ class _EarningsModalState extends State<EarningsModal>
                             // Today's earnings card
                             _buildEarningsCard(
                               'Today\'s Earnings',
-                              '\$${(driver.rating * 15.5).toStringAsFixed(2)}', // Mock today's earnings
+                              '₱${(driver.rating * 15.5).toStringAsFixed(2)}', // Mock today's earnings
                               '${driver.totalDeliveries > 10 ? 5 : driver.totalDeliveries % 3} deliveries completed',
                               SwiftDashColors.lightBlue,
                               Icons.today,
@@ -126,7 +126,7 @@ class _EarningsModalState extends State<EarningsModal>
                             // This week's earnings
                             _buildEarningsCard(
                               'This Week',
-                              '\$${(driver.rating * 85.75).toStringAsFixed(2)}', // Mock week earnings
+                              '₱${(driver.rating * 85.75).toStringAsFixed(2)}', // Mock week earnings
                               '${driver.totalDeliveries > 20 ? 23 : driver.totalDeliveries + 8} total deliveries',
                               Colors.green,
                               Icons.calendar_view_week,
@@ -137,7 +137,7 @@ class _EarningsModalState extends State<EarningsModal>
                             // Total earnings
                             _buildEarningsCard(
                               'Total Earnings',
-                              '\$${(driver.totalDeliveries * 12.5 + driver.rating * 45).toStringAsFixed(2)}',
+                              '₱${(driver.totalDeliveries * 12.5 + driver.rating * 45).toStringAsFixed(2)}',
                               '${driver.totalDeliveries} lifetime deliveries',
                               SwiftDashColors.darkBlue,
                               Icons.account_balance_wallet,

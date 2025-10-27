@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../models/delivery.dart';
 import '../models/driver.dart';
 import '../services/realtime_service.dart';
-import '../services/optimized_location_service.dart';
-import '../services/background_location_service.dart';
 import '../services/auth_service.dart';
-import '../screens/active_delivery_screen.dart';
+import '../services/driver_location_service.dart';
+import '../services/ably_service.dart';
+import '../services/idle_location_update_service.dart';
+import '../services/background_location_service.dart';
 import '../core/supabase_config.dart';
 
 /// Service to manage the complete driver delivery flow and state transitions
@@ -17,8 +19,8 @@ class DriverFlowService {
   DriverFlowService._internal();
 
   final RealtimeService _realtimeService = RealtimeService();
-  final OptimizedLocationService _locationService = OptimizedLocationService();
   final AuthService _authService = AuthService();
+  final IdleLocationUpdateService _idleLocationService = IdleLocationUpdateService();
 
   Driver? _currentDriver;
   Delivery? _activeDelivery;
@@ -53,17 +55,38 @@ class DriverFlowService {
         _activeDelivery = activeDeliveries.first;
         
         // Resume location tracking if delivery is in progress
-        if (_activeDelivery!.status == DeliveryStatus.driverAssigned ||
-            _activeDelivery!.status == DeliveryStatus.goingToPickup ||
-            _activeDelivery!.status == DeliveryStatus.packageCollected ||
-            _activeDelivery!.status == DeliveryStatus.goingToDestination ||
-            _activeDelivery!.status == DeliveryStatus.atDestination) {
+        // ✅ FIX: Include all active statuses including pickup_arrived and at_destination
+        // 🔒 CRITICAL: Only start if NOT already tracking to prevent infinite restart loop
+        if (!_isLocationTrackingActive &&
+            (_activeDelivery!.status == DeliveryStatus.driverAssigned ||
+             _activeDelivery!.status == DeliveryStatus.goingToPickup ||
+             _activeDelivery!.status == DeliveryStatus.pickupArrived ||
+             _activeDelivery!.status == DeliveryStatus.packageCollected ||
+             _activeDelivery!.status == DeliveryStatus.goingToDestination ||
+             _activeDelivery!.status == DeliveryStatus.atDestination)) {
+          print('🔄 Resuming location tracking for active delivery: ${_activeDelivery!.id}');
           await _startLocationTracking();
+        } else if (_isLocationTrackingActive) {
+          print('✅ Location tracking already active - skipping restart');
+        }
+      } else {
+        // No active delivery found - clear the state
+        _activeDelivery = null;
+        // Stop tracking if still active
+        if (_isLocationTrackingActive) {
+          await _stopLocationTracking();
         }
       }
     } catch (e) {
       print('❌ Error loading active delivery: $e');
     }
+  }
+  
+  /// Refresh active delivery (public method for manual refresh after accepting)
+  Future<void> refreshActiveDelivery() async {
+    print('🔄 Manually refreshing active delivery...');
+    await _loadActiveDelivery();
+    print('🔄 Active delivery refreshed: ${_activeDelivery?.id ?? "none"}');
   }
 
   /// Initialize realtime subscriptions
@@ -92,22 +115,47 @@ class DriverFlowService {
       // Update driver online status in both tables (includes location update)
       await _authService.updateOnlineStatus(true);
       
-      // Start location tracking for continuous updates (avoid duplicate with auth service)
+      // ✅ FIX: Re-initialize Ably with clientId for presence features
       try {
-        // Only start if not already started by auth service
-        final isAlreadyRunning = await BackgroundLocationService.isServiceRunning();
-        if (!isAlreadyRunning) {
-          await _locationService.startDeliveryTracking(
-            driverId: _currentDriver!.id,
-            deliveryId: 'available_${_currentDriver!.id}', // Special ID for availability tracking
-          );
-          print('📍 Started continuous location tracking for driver availability');
-        } else {
-          print('📍 Location tracking already active from auth service');  
+        final ablyKey = dotenv.env['ABLY_CLIENT_KEY'];
+        if (ablyKey != null && ablyKey.isNotEmpty) {
+          await AblyService().initialize(ablyKey, clientId: _currentDriver!.id);
+          print('✅ Ably re-initialized with driver clientId for presence');
+          
+          // 🚨 FIX: Ensure Ably is connected
+          await AblyService().reconnect();
+          
+          // Verify connection state
+          final isConnected = AblyService().isConnected;
+          print('🔌 Ably connection state after reconnect: ${AblyService().connectionState}');
+          
+          if (!isConnected) {
+            print('⚠️ WARNING: Ably not connected after initialization - location tracking may fail');
+          }
         }
       } catch (e) {
-        print('⚠️ Could not start continuous location tracking: $e');
-        // Don't fail the online process - initial location is already set in updateOnlineStatus
+        print('⚠️ Could not re-initialize Ably: $e');
+      }
+      
+      // ✅ FIX: DON'T broadcast location when idle (no active delivery)
+      // Location will be broadcast ONLY when driver has an active delivery
+      // Customer app doesn't need constant location updates for available drivers
+      print('📍 Location broadcasting will start when delivery is accepted');
+
+      // ✅ START: Idle location updates for accurate pairing
+      // This updates driver_profiles table periodically (5 min) and when driver moves (>100m)
+      await _idleLocationService.startIdleLocationUpdates(_currentDriver!.id);
+      print('📍 Started idle location updates for driver pairing accuracy');
+
+      // 🚨 START: Foreground service to keep app alive when online
+      try {
+        await BackgroundLocationService.startOnlineStatusService(
+          driverId: _currentDriver!.id,
+        );
+        print('✅ Foreground service started - app will stay online in background');
+      } catch (e) {
+        print('⚠️ Failed to start foreground service: $e');
+        // Continue without foreground service - app may be killed in background
       }
 
       // Reload driver profile to get updated status with location
@@ -145,9 +193,21 @@ class DriverFlowService {
     }
 
     try {
-      // Stop location tracking first
-      await _locationService.stopTracking();
-      print('📍 Stopped location tracking');
+      // Stop Ably location tracking first
+      DriverLocationService().stopTracking();
+      print('📍 Stopped Ably location tracking');
+
+      // Stop idle location updates
+      _idleLocationService.stopIdleLocationUpdates();
+      print('📍 Stopped idle location updates');
+
+      // 🚨 STOP: Foreground service when going offline
+      try {
+        await BackgroundLocationService.stopOnlineStatusService();
+        print('✅ Foreground service stopped');
+      } catch (e) {
+        print('⚠️ Failed to stop foreground service: $e');
+      }
 
       // Update driver offline status in both tables
       await _authService.updateOnlineStatus(false);
@@ -235,7 +295,9 @@ class DriverFlowService {
       // Get current location for status update
       Position? currentPosition;
       try {
-        currentPosition = await _locationService.getCurrentPosition();
+        currentPosition = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+        );
       } catch (e) {
         print('⚠️ Could not get current position: $e');
       }
@@ -243,7 +305,7 @@ class DriverFlowService {
       // Update status in database
       final success = await _realtimeService.updateDeliveryStatus(
         _activeDelivery!.id,
-        newStatus.name,
+        newStatus.databaseValue,  // ✅ Use snake_case for database/customer app
         latitude: currentPosition?.latitude,
         longitude: currentPosition?.longitude,
       );
@@ -266,42 +328,51 @@ class DriverFlowService {
   }
 
   /// Navigate to active delivery screen
+  /// DEPRECATED: This method is no longer used - deliveries now shown on main map screen
+  @Deprecated('Use main_map_screen with DraggableDeliveryPanel instead')
   void navigateToActiveDelivery(BuildContext context) {
     if (_activeDelivery == null) return;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ActiveDeliveryScreen(delivery: _activeDelivery!),
-      ),
-    );
+    // Navigation removed - delivery now shown on main map screen
+    print('⚠️ navigateToActiveDelivery called but deprecated - use main_map_screen instead');
   }
 
-  /// Start location tracking
+  /// Start location tracking with Ably
   Future<void> _startLocationTracking() async {
-    if (_activeDelivery == null || _currentDriver == null || _isLocationTrackingActive) return;
+    if (_activeDelivery == null || _currentDriver == null) {
+      print('⚠️ Cannot start location tracking - missing delivery or driver');
+      return;
+    }
+    
+    if (_isLocationTrackingActive) {
+      print('⚠️ Location tracking already active - skipping duplicate start for delivery: ${_activeDelivery!.id}');
+      return;
+    }
 
     try {
-      await _locationService.startDeliveryTracking(
-        driverId: _currentDriver!.id,
-        deliveryId: _activeDelivery!.id,
-      );
+      // Stop idle location updates - we're now actively tracking
+      _idleLocationService.stopIdleLocationUpdates();
+      print('📍 Stopped idle location updates (starting active tracking)');
+
+      // Use DriverLocationService for Ably-based location broadcasting
+      DriverLocationService().startTracking(_activeDelivery!.id);
       _isLocationTrackingActive = true;
-      print('✅ Location tracking started for delivery: ${_activeDelivery!.id}');
+      print('✅ Ably location tracking started for delivery: ${_activeDelivery!.id}');
     } catch (e) {
-      print('❌ Failed to start location tracking: $e');
+      print('❌ Failed to start Ably location tracking: $e');
     }
   }
 
-  /// Stop location tracking
+  /// Stop Ably location tracking
   Future<void> _stopLocationTracking() async {
     if (!_isLocationTrackingActive) return;
 
     try {
-      await _locationService.stopTracking();
+      DriverLocationService().stopTracking();
       _isLocationTrackingActive = false;
-      print('✅ Location tracking stopped');
+      print('✅ Ably location tracking stopped');
     } catch (e) {
-      print('❌ Failed to stop location tracking: $e');
+      print('❌ Failed to stop Ably location tracking: $e');
     }
   }
 
@@ -332,6 +403,12 @@ class DriverFlowService {
   Future<void> _handleDeliveryCompletion(BuildContext context) async {
     await _stopLocationTracking();
     _activeDelivery = null;
+    
+    // Restart idle location updates for driver pairing
+    if (_currentDriver != null) {
+      await _idleLocationService.startIdleLocationUpdates(_currentDriver!.id);
+      print('📍 Restarted idle location updates after delivery completion');
+    }
     
     _showSuccess(context, 'Delivery completed successfully! 🎉');
     
@@ -456,7 +533,7 @@ class DriverFlowService {
 
   /// Open maps navigation
   void _openMapsNavigation(double lat, double lng) async {
-    final url = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng';
+    final url = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving';
     try {
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     } catch (e) {

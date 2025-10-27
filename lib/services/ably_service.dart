@@ -1,0 +1,169 @@
+import 'package:ably_flutter/ably_flutter.dart' as ably;
+import 'package:flutter/foundation.dart';
+
+class AblyService {
+  static final AblyService _instance = AblyService._internal();
+  factory AblyService() => _instance;
+  AblyService._internal();
+
+  ably.Realtime? _realtime;
+  final Map<String, ably.RealtimeChannel> _channels = {};
+  String? _clientId;  // Store client ID for presence features
+
+  Future<void> initialize(String clientKey, {String? clientId}) async {
+    // 🚨 FIX: If already initialized but with different clientId, reinitialize
+    if (_realtime != null) {
+      if (clientId != null && _clientId != clientId) {
+        debugPrint('🔄 Ably clientId changed from $_clientId to $clientId - reinitializing...');
+        await dispose();
+      } else {
+        debugPrint('⚠️ Ably already initialized with same clientId');
+        return;
+      }
+    }
+
+    try {
+      _clientId = clientId;  // Store for future reference
+      
+      final clientOptions = ably.ClientOptions(
+        key: clientKey,
+        clientId: clientId,  // ✅ FIX: Set clientId for presence features
+        logLevel: kDebugMode ? ably.LogLevel.error : ably.LogLevel.error,
+        autoConnect: true,
+      );
+
+      _realtime = ably.Realtime(options: clientOptions);
+      
+      _realtime!.connection.on().listen((ably.ConnectionStateChange stateChange) {
+        debugPrint('🔌 Ably connection: ${stateChange.current}');
+        
+        // 🚨 AUTO-RECONNECT on disconnection
+        if (stateChange.current == ably.ConnectionState.disconnected ||
+            stateChange.current == ably.ConnectionState.suspended ||
+            stateChange.current == ably.ConnectionState.failed) {
+          debugPrint('⚠️ Ably connection lost: ${stateChange.current} - waiting for auto-reconnect');
+        }
+        
+        if (stateChange.current == ably.ConnectionState.connected) {
+          debugPrint('✅ Ably connection restored/established');
+        }
+      });
+
+      debugPrint('✅ Ably service initialized with clientId: $clientId');
+    } catch (e) {
+      debugPrint('❌ Failed to initialize Ably: $e');
+      rethrow;
+    }
+  }
+
+  ably.RealtimeChannel getChannel(String channelName) {
+    if (_realtime == null) {
+      throw Exception('Ably not initialized. Call initialize() first.');
+    }
+
+    if (_channels.containsKey(channelName)) {
+      return _channels[channelName]!;
+    }
+
+    final channel = _realtime!.channels.get(channelName);
+    _channels[channelName] = channel;
+    debugPrint('📡 Created channel: $channelName');
+    return channel;
+  }
+
+  Future<void> publishLocation(String deliveryId, Map<String, dynamic> location) async {
+    try {
+      final channelName = 'tracking:$deliveryId';
+      final channel = getChannel(channelName);
+      
+      await channel.publish(
+        name: 'location-update',  // ✅ CRITICAL FIX: Changed from 'location_update' to match customer app
+        data: location,
+      );
+      
+      debugPrint('📍 Published location to $channelName with event: location-update');
+    } catch (e) {
+      debugPrint('❌ Failed to publish location: $e');
+    }
+  }
+
+  Future<void> enterPresence(String deliveryId) async {
+    try {
+      final channelName = 'tracking:$deliveryId';
+      final channel = getChannel(channelName);
+      
+      await channel.presence.enter();
+      debugPrint('👋 Entered presence: $channelName');
+    } catch (e) {
+      debugPrint('❌ Failed to enter presence: $e');
+    }
+  }
+
+  Future<void> leavePresence(String deliveryId) async {
+    try {
+      final channelName = 'tracking:$deliveryId';
+      final channel = getChannel(channelName);
+      
+      await channel.presence.leave();
+      debugPrint('👋 Left presence: $channelName');
+    } catch (e) {
+      debugPrint('❌ Failed to leave presence: $e');
+    }
+  }
+
+  /// Get connection state
+  ably.ConnectionState? get connectionState => _realtime?.connection.state;
+  
+  /// Check if connected
+  bool get isConnected => _realtime?.connection.state == ably.ConnectionState.connected;
+  
+  /// Force reconnect if disconnected
+  Future<void> reconnect() async {
+    if (_realtime == null) {
+      debugPrint('⚠️ Ably not initialized, cannot reconnect');
+      return;
+    }
+    
+    try {
+      final currentState = _realtime!.connection.state;
+      debugPrint('🔄 Current Ably state: $currentState');
+      
+      if (currentState == ably.ConnectionState.disconnected ||
+          currentState == ably.ConnectionState.suspended ||
+          currentState == ably.ConnectionState.failed) {
+        debugPrint('🔄 Forcing Ably reconnection...');
+        await _realtime!.connection.connect();
+      } else if (currentState == ably.ConnectionState.connected) {
+        debugPrint('✅ Ably already connected');
+      } else {
+        debugPrint('⏳ Ably connecting... state: $currentState');
+      }
+    } catch (e) {
+      debugPrint('❌ Failed to reconnect Ably: $e');
+    }
+  }
+
+  Future<void> dispose() async {
+    // 🚨 FIX: Properly detach and clean up channels
+    for (var entry in _channels.entries) {
+      try {
+        debugPrint('📡 Detaching channel: ${entry.key}');
+        await entry.value.detach();
+      } catch (e) {
+        debugPrint('⚠️ Error detaching channel ${entry.key}: $e');
+      }
+    }
+    _channels.clear();
+    
+    // Close connection
+    try {
+      await _realtime?.close();
+    } catch (e) {
+      debugPrint('⚠️ Error closing Ably: $e');
+    }
+    
+    _realtime = null;
+    _clientId = null;
+    debugPrint('🔌 Ably service disposed');
+  }
+}

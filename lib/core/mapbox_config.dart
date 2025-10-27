@@ -3,7 +3,7 @@ class MapboxConfig {
   static const String accessToken = 'pk.eyJ1Ijoic3dpZnRkYXNoIiwiYSI6ImNtZzNiazczczEzZmQycnIwdno1Z2NtYW0ifQ.9zBJVXVCBLU3eN1jZQTJUA';
   
   // Map styles
-  static const String streetStyle = 'mapbox://styles/mapbox/streets-v12';
+  static const String streetStyle = 'mapbox://styles/swiftdash/cmh0gjtfm007h01r4ghel4u4m'; // SwiftDash custom style
   static const String satelliteStyle = 'mapbox://styles/mapbox/satellite-streets-v12';
   static const String darkStyle = 'mapbox://styles/mapbox/dark-v11';
   static const String navigationDayStyle = 'mapbox://styles/mapbox/navigation-day-v1';
