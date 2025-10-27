@@ -52,6 +52,8 @@ dependencies:
   battery_plus: ^5.0.2
   flutter_dotenv: ^5.1.0
   intl: ^0.19.0
+  uuid: ^4.5.1
+  cached_network_image: ^3.3.0
   
   # Phase 3: Delight animations
   confetti: ^0.7.0

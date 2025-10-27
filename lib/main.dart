@@ -14,6 +14,7 @@ import 'screens/debug_vehicle_types_screen.dart';
 import 'services/auth_service.dart';
 import 'services/driver_flow_service.dart';
 import 'services/ably_service.dart';
+import 'services/chat_service.dart';
 import 'models/driver.dart';
 import 'models/delivery.dart';
 import 'screens/improved_delivery_offers_screen.dart';
@@ -52,6 +53,10 @@ void main() async {
     if (ablyKey != null && ablyKey.isNotEmpty) {
       await AblyService().initialize(ablyKey);
       print('✅ Ably service initialized');
+      
+      // Initialize Chat service with same Ably key
+      await ChatService().initialize(ablyKey);
+      print('✅ Chat service initialized');
     } else {
       print('⚠️ ABLY_CLIENT_KEY not found in .env file');
       print('⚠️ Ably real-time tracking will not be available');

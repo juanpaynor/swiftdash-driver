@@ -14,6 +14,7 @@ import '../services/multi_stop_service.dart';
 import '../widgets/pickup_confirmation_dialog.dart';
 import '../widgets/proof_of_delivery_dialog.dart';
 import '../widgets/multi_stop_widgets.dart';
+import '../screens/delivery_chat_screen.dart';
 
 /// Panel display mode
 enum PanelMode {
@@ -1258,6 +1259,14 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
         const SizedBox(width: 8),
         Expanded(
           child: _buildQuickActionButton(
+            icon: Icons.chat_bubble_outline,
+            label: 'Chat',
+            onTap: _openChat,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _buildQuickActionButton(
             icon: Icons.navigation,
             label: 'Navigate',
             onTap: () {
@@ -1702,6 +1711,27 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
           ),
         );
       }
+    }
+  }
+
+  /// Open chat screen
+  Future<void> _openChat() async {
+    final driver = await supabase
+        .from('drivers')
+        .select('id, name')
+        .eq('user_id', supabase.auth.currentUser!.id)
+        .single();
+
+    if (context.mounted) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => DeliveryChatScreen(
+            delivery: widget.delivery,
+            driverId: driver['id'],
+            driverName: driver['name'],
+          ),
+        ),
+      );
     }
   }
   
