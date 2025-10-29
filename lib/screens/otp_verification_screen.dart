@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/otp_service.dart';
+import '../core/supabase_config.dart';
+import '../core/app_assets.dart';
 
 /// Screen for verifying phone number via OTP
 /// Shows OTP input field, timer, and resend button
@@ -89,7 +91,7 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('OTP code sent to ${widget.phoneNumber}'),
-            backgroundColor: Colors.green,
+            backgroundColor: SwiftDashColors.successGreen,
           ),
         );
       }
@@ -138,9 +140,23 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: SwiftDashColors.white,
       appBar: AppBar(
-        title: const Text('Verify Phone Number'),
+        backgroundColor: Colors.transparent,
         elevation: 0,
+        leading: IconButton(
+          icon: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
+              ),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.arrow_back, color: SwiftDashColors.white, size: 20),
+          ),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
       ),
       body: SafeArea(
         child: Padding(
@@ -152,11 +168,29 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
               children: [
                 const SizedBox(height: 20),
                 
-                // Icon
-                Icon(
-                  Icons.phone_android,
-                  size: 80,
-                  color: Theme.of(context).primaryColor,
+                // SwiftDash Logo
+                Center(
+                  child: Container(
+                    width: 120,
+                    height: 120,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: SwiftDashColors.lightBlue.withOpacity(0.3),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: Image.asset(
+                        AppAssets.logo,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
                 ),
                 
                 const SizedBox(height: 30),
@@ -164,9 +198,11 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
                 // Title
                 Text(
                   'Enter Verification Code',
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: SwiftDashColors.darkBlue,
+                  ),
                   textAlign: TextAlign.center,
                 ),
                 
@@ -175,69 +211,95 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
                 // Subtitle
                 Text(
                   'We sent a 6-digit code to\n${widget.phoneNumber}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.grey[600],
-                      ),
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: SwiftDashColors.textGrey,
+                  ),
                   textAlign: TextAlign.center,
                 ),
                 
                 const SizedBox(height: 40),
                 
                 // OTP Input Field
-                TextFormField(
-                  controller: _otpController,
-                  keyboardType: TextInputType.number,
-                  textAlign: TextAlign.center,
-                  maxLength: 6,
-                  style: const TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 10,
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: SwiftDashColors.lightBlue.withOpacity(0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
                   ),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                  ],
-                  decoration: InputDecoration(
-                    hintText: '000000',
-                    counterText: '',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: Colors.grey[300]!,
-                        width: 2,
+                  child: TextFormField(
+                    controller: _otpController,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    maxLength: 6,
+                    style: const TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 10,
+                      color: SwiftDashColors.darkBlue,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                    ],
+                    decoration: InputDecoration(
+                      hintText: '000000',
+                      hintStyle: TextStyle(
+                        color: SwiftDashColors.textGrey.withOpacity(0.3),
+                      ),
+                      counterText: '',
+                      filled: true,
+                      fillColor: SwiftDashColors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: SwiftDashColors.textGrey.withOpacity(0.2),
+                          width: 2,
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: SwiftDashColors.textGrey.withOpacity(0.2),
+                          width: 2,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: SwiftDashColors.lightBlue,
+                          width: 2,
+                        ),
+                      ),
+                      errorBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: SwiftDashColors.dangerRed,
+                          width: 2,
+                        ),
+                      ),
+                      focusedErrorBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(
+                          color: SwiftDashColors.dangerRed,
+                          width: 2,
+                        ),
                       ),
                     ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: Colors.grey[300]!,
-                        width: 2,
-                      ),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: Theme.of(context).primaryColor,
-                        width: 2,
-                      ),
-                    ),
-                    errorBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(
-                        color: Colors.red,
-                        width: 2,
-                      ),
-                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter OTP code';
+                      }
+                      if (value.length != 6) {
+                        return 'OTP must be 6 digits';
+                      }
+                      return null;
+                    },
                   ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter OTP code';
-                    }
-                    if (value.length != 6) {
-                      return 'OTP must be 6 digits';
-                    }
-                    return null;
-                  },
                 ),
                 
                 const SizedBox(height: 20),
@@ -247,18 +309,26 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.red[50],
+                      color: SwiftDashColors.dangerRed.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.red[200]!),
+                      border: Border.all(
+                        color: SwiftDashColors.dangerRed.withOpacity(0.3),
+                      ),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.error_outline, color: Colors.red[700]),
+                        const Icon(
+                          Icons.error_outline,
+                          color: SwiftDashColors.dangerRed,
+                        ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             _errorMessage!,
-                            style: TextStyle(color: Colors.red[700]),
+                            style: const TextStyle(
+                              color: SwiftDashColors.dangerRed,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ),
                       ],
@@ -268,30 +338,50 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
                 const SizedBox(height: 20),
                 
                 // Verify Button
-                ElevatedButton(
-                  onPressed: _isVerifying ? null : _verifyOTP,
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
                     ),
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: SwiftDashColors.lightBlue.withOpacity(0.3),
+                        blurRadius: 10,
+                        offset: const Offset(0, 5),
+                      ),
+                    ],
                   ),
-                  child: _isVerifying
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  child: ElevatedButton(
+                    onPressed: _isVerifying ? null : _verifyOTP,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      shadowColor: Colors.transparent,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: _isVerifying
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(SwiftDashColors.white),
+                            ),
+                          )
+                        : const Text(
+                            'Verify Code',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: SwiftDashColors.white,
+                            ),
                           ),
-                        )
-                      : const Text(
-                          'Verify Code',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                  ),
                 ),
                 
                 const SizedBox(height: 30),
@@ -302,21 +392,33 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
                   children: [
                     Text(
                       "Didn't receive the code? ",
-                      style: TextStyle(color: Colors.grey[600]),
+                      style: const TextStyle(
+                        color: SwiftDashColors.textGrey,
+                        fontSize: 14,
+                      ),
                     ),
                     if (_canResend)
                       TextButton(
                         onPressed: _isResending ? null : _resendOTP,
+                        style: TextButton.styleFrom(
+                          foregroundColor: SwiftDashColors.lightBlue,
+                        ),
                         child: _isResending
                             ? const SizedBox(
                                 height: 16,
                                 width: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    SwiftDashColors.lightBlue,
+                                  ),
+                                ),
                               )
                             : const Text(
                                 'Resend',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
+                                  fontSize: 14,
                                 ),
                               ),
                       )
@@ -324,8 +426,9 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
                       Text(
                         'Resend in $_remainingSeconds s',
                         style: TextStyle(
-                          color: Colors.grey[400],
+                          color: SwiftDashColors.textGrey.withOpacity(0.6),
                           fontWeight: FontWeight.bold,
+                          fontSize: 14,
                         ),
                       ),
                   ],
@@ -337,19 +440,32 @@ class _OTPVerificationScreenState extends State<OTPVerificationScreen> {
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.blue[50],
+                    gradient: LinearGradient(
+                      colors: [
+                        SwiftDashColors.lightBlue.withOpacity(0.1),
+                        SwiftDashColors.darkBlue.withOpacity(0.05),
+                      ],
+                    ),
                     borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: SwiftDashColors.lightBlue.withOpacity(0.2),
+                    ),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.info_outline, color: Colors.blue[700]),
+                      const Icon(
+                        Icons.info_outline,
+                        color: SwiftDashColors.lightBlue,
+                        size: 20,
+                      ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           'The verification code was sent via SMS to your phone number.',
                           style: TextStyle(
-                            color: Colors.blue[700],
+                            color: SwiftDashColors.darkBlue.withOpacity(0.8),
                             fontSize: 12,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ),

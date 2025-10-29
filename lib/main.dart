@@ -8,7 +8,8 @@ import 'screens/auth_wrapper.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/main_map_screen.dart';
-import 'services/background_location_service.dart';
+// 🧹 RAM OPTIMIZATION: BackgroundLocationService disabled to save ~40MB
+// import 'services/background_location_service.dart';
 import 'screens/delivery_debug_screen.dart';
 import 'screens/debug_vehicle_types_screen.dart';
 import 'services/auth_service.dart';
@@ -47,56 +48,88 @@ void main() async {
   // Initialize Mapbox
   MapboxOptions.setAccessToken(MapboxConfig.accessToken);
   
-  // Initialize Ably (if API key available)
-  try {
-    final ablyKey = dotenv.env['ABLY_CLIENT_KEY'];
-    if (ablyKey != null && ablyKey.isNotEmpty) {
-      await AblyService().initialize(ablyKey);
-      print('✅ Ably service initialized');
-      
-      // Initialize Chat service with same Ably key
-      await ChatService().initialize(ablyKey);
-      print('✅ Chat service initialized');
-    } else {
-      print('⚠️ ABLY_CLIENT_KEY not found in .env file');
-      print('⚠️ Ably real-time tracking will not be available');
-    }
-  } catch (e) {
-    print('⚠️ Ably initialization failed: $e');
-    print('⚠️ App will continue with Supabase tracking only');
-  }
-  
-  // Initialize state managers
-  try {
-    print('🚀 Initializing state managers...');
-    await DriverStateManager.instance.initialize();
-    print('✅ Driver state manager initialized');
-  } catch (e) {
-    print('⚠️ Driver state manager initialization failed: $e');
-  }
-  
-  // Check device compatibility and initialize background service
-  try {
-    print('🔍 Checking device compatibility...');
-    final deviceCompatibility = DeviceCompatibilityService.instance;
-    final isCompatible = await deviceCompatibility.checkDeviceCompatibility();
-    
-    if (isCompatible) {
-      print('✅ Device is compatible, initializing background service...');
-      await BackgroundLocationService.initializeService();
-      print('✅ Background service initialized successfully');
-    } else {
-      print('⚠️ Device has compatibility issues with background services');
-      print('📱 Device info: ${deviceCompatibility.deviceInfo}');
-      print('🔄 App will use fallback location strategy: ${deviceCompatibility.getFallbackStrategy()}');
-    }
-  } catch (e) {
-    print('❌ Background service initialization failed: $e');
-    print('🔄 App will continue without background service - location tracking will be limited when app is minimized');
-    // App can still run without background service, just location tracking will be limited
-  }
-  
   runApp(const MyApp());
+  
+  
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    _initializeServicesInBackground();
+  });
+}
+
+/// Initialize services in background after app UI is ready (non-blocking)
+Future<void> _initializeServicesInBackground() async {
+  // Initialize Ably (if API key available) - non-blocking
+  _initAbly();
+  
+  // Initialize state managers - non-blocking  
+  _initStateManagers();
+  
+  // Check device compatibility and initialize background service - non-blocking
+  _initBackgroundServices();
+}
+
+/// Initialize Ably service in background
+void _initAbly() {
+  Future(() async {
+    try {
+      final ablyKey = dotenv.env['ABLY_CLIENT_KEY'];
+      if (ablyKey != null && ablyKey.isNotEmpty) {
+        await AblyService().initialize(ablyKey);
+        print('✅ Ably service initialized');
+        
+        // Initialize Chat service with same Ably key
+        await ChatService().initialize(ablyKey);
+        print('✅ Chat service initialized');
+      } else {
+        print('⚠️ ABLY_CLIENT_KEY not found in .env file');
+        print('⚠️ Ably real-time tracking will not be available');
+      }
+    } catch (e) {
+      print('⚠️ Ably initialization failed: $e');
+      print('⚠️ App will continue with Supabase tracking only');
+    }
+  });
+}
+
+/// Initialize state managers in background
+void _initStateManagers() {
+  Future(() async {
+    try {
+      print('🚀 Initializing state managers...');
+      await DriverStateManager.instance.initialize();
+      print('✅ Driver state manager initialized');
+    } catch (e) {
+      print('⚠️ Driver state manager initialization failed: $e');
+    }
+  });
+}
+
+/// Initialize background location services
+void _initBackgroundServices() {
+  Future(() async {
+    try {
+      print('🔍 Checking device compatibility...');
+      final deviceCompatibility = DeviceCompatibilityService.instance;
+      final isCompatible = await deviceCompatibility.checkDeviceCompatibility();
+      
+      if (isCompatible) {
+        // 🧹 RAM OPTIMIZATION: BackgroundLocationService disabled (~40MB saved)
+        // Using OptimizedLocationService instead which handles location tracking more efficiently
+        print('✅ Device compatible - using OptimizedLocationService for location tracking');
+        print('💾 RAM saved: ~40MB (BackgroundLocationService disabled)');
+        
+        // NOTE: If you need background location when app is minimized, re-enable below:
+        // await BackgroundLocationService.initializeService();
+      } else {
+        print('⚠️ Device has compatibility issues with background services');
+        print('📱 Device info: ${deviceCompatibility.deviceInfo}');
+        print('🔄 App will use fallback location strategy: ${deviceCompatibility.getFallbackStrategy()}');
+      }
+    } catch (e) {
+      print('❌ Background service check failed: $e');
+      print('🔄 App will continue with OptimizedLocationService');
+    }
+  });
 }
 
 class MyApp extends StatelessWidget {

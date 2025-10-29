@@ -18,6 +18,9 @@ class ChatService {
   final Map<String, StreamController<bool>> _typingControllers = {};
   final Map<String, List<ChatMessage>> _messageCache = {};
   
+  // 🧹 RAM optimization: Limit cached messages per delivery
+  static const int _maxCachedMessages = 50;
+  
   final SupabaseClient _supabase = Supabase.instance.client;
   final ImagePicker _imagePicker = ImagePicker();
 
@@ -80,7 +83,10 @@ class ChatService {
     channel.subscribe(name: 'message').listen((message) {
       try {
         final chatMessage = ChatMessage.fromJson(message.data as Map<String, dynamic>);
-        _messageCache[deliveryId]!.add(chatMessage);
+        
+        // Add to cache with limit
+        _addToCache(deliveryId, chatMessage);
+        
         controller.add(chatMessage);
         debugPrint('💬 Received message: ${chatMessage.message}');
       } catch (e) {
@@ -452,6 +458,50 @@ class ChatService {
   /// Get cached messages for delivery
   List<ChatMessage> getCachedMessages(String deliveryId) {
     return _messageCache[deliveryId] ?? [];
+  }
+
+  /// Add message to cache with limit to prevent unbounded growth
+  void _addToCache(String deliveryId, ChatMessage message) {
+    if (!_messageCache.containsKey(deliveryId)) {
+      _messageCache[deliveryId] = [];
+    }
+    
+    _messageCache[deliveryId]!.add(message);
+    
+    // 🧹 Trim cache if exceeded limit (keep most recent messages)
+    if (_messageCache[deliveryId]!.length > _maxCachedMessages) {
+      _messageCache[deliveryId]!.removeAt(0); // Remove oldest message
+      debugPrint('🧹 Trimmed chat cache for $deliveryId (keeping last $_maxCachedMessages messages)');
+    }
+  }
+
+  /// Clean up chat resources when delivery is complete (call this to save RAM)
+  Future<void> cleanupDeliveryChat(String deliveryId) async {
+    debugPrint('🧹 Starting cleanup for delivery chat: $deliveryId');
+    
+    try {
+      // Close and remove stream controllers
+      await _messageControllers[deliveryId]?.close();
+      _messageControllers.remove(deliveryId);
+      
+      await _typingControllers[deliveryId]?.close();
+      _typingControllers.remove(deliveryId);
+      
+      // Clear message cache
+      _messageCache.remove(deliveryId);
+      
+      // Detach from Ably channel
+      if (_channels.containsKey(deliveryId)) {
+        await _channels[deliveryId]!.detach();
+        _channels.remove(deliveryId);
+      }
+      
+      debugPrint('✅ Chat cleanup complete for delivery: $deliveryId');
+      debugPrint('   - Active controllers: ${_messageControllers.length}');
+      debugPrint('   - Active channels: ${_channels.length}');
+    } catch (e) {
+      debugPrint('⚠️ Error during chat cleanup: $e');
+    }
   }
 
   /// Unsubscribe from chat

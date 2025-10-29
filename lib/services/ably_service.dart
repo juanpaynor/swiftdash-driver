@@ -61,14 +61,39 @@ class AblyService {
       throw Exception('Ably not initialized. Call initialize() first.');
     }
 
+    // Return existing channel if already created
     if (_channels.containsKey(channelName)) {
       return _channels[channelName]!;
     }
 
+    // Create new channel (lazy initialization)
     final channel = _realtime!.channels.get(channelName);
     _channels[channelName] = channel;
-    debugPrint('📡 Created channel: $channelName');
+    debugPrint('📡 Created channel: $channelName (total: ${_channels.length})');
+    
+    // 🧹 Auto-cleanup: Keep max 5 active channels to prevent memory leaks
+    // Old channels are automatically detached when limit exceeded
+    if (_channels.length > 5) {
+      final oldestKey = _channels.keys.first;
+      debugPrint('🧹 Auto-cleanup: Detaching old channel: $oldestKey');
+      _channels[oldestKey]?.detach();
+      _channels.remove(oldestKey);
+    }
+    
     return channel;
+  }
+
+  /// Manually cleanup a specific channel when delivery is complete
+  Future<void> cleanupChannel(String channelName) async {
+    if (_channels.containsKey(channelName)) {
+      try {
+        await _channels[channelName]!.detach();
+        _channels.remove(channelName);
+        debugPrint('🧹 Cleaned up channel: $channelName');
+      } catch (e) {
+        debugPrint('⚠️ Error cleaning up channel $channelName: $e');
+      }
+    }
   }
 
   Future<void> publishLocation(String deliveryId, Map<String, dynamic> location) async {

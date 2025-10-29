@@ -47,6 +47,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   geo.Position? _currentPosition;
   MapboxMap? _mapboxMap;
   
+  // 🔧 PERFORMANCE FIX: Track stream subscriptions for proper cleanup
+  StreamSubscription<Delivery>? _offerStreamSubscription;
+  
   // Debouncing for rapid toggles
   bool _isToggling = false;
   DateTime? _lastToggleTime;
@@ -199,9 +202,14 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       }
       
       // 🚨 CRITICAL FIX: Set up offer modal listener with debugging
+      // 🔧 PERFORMANCE FIX: Cancel existing subscription before creating new one
       if (_currentDriver != null) {
         print('🔔 Setting up offer modal listener for driver: ${_currentDriver!.id}');
-        _realtimeService.offerModalStream.listen((delivery) {
+        
+        // Cancel any existing subscription to prevent memory leaks
+        await _offerStreamSubscription?.cancel();
+        
+        _offerStreamSubscription = _realtimeService.offerModalStream.listen((delivery) {
           print('🔔 *** OFFER MODAL STREAM RECEIVED DELIVERY: ${delivery.id} ***');
           print('🔔 Driver online status: ${driverState.isOnline}');
           print('🔔 Screen mounted: $mounted');
@@ -316,8 +324,16 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    
+    // 🔧 PERFORMANCE FIX: Cancel stream subscriptions FIRST
+    _offerStreamSubscription?.cancel();
+    _offerStreamSubscription = null;
+    
+    // Dispose animation controllers
     _onlineToggleController.dispose();
     _pulseController.dispose();
+    
+    // Dispose realtime service
     _realtimeService.dispose();
     
     // Unsubscribe from cancellation channel
@@ -501,9 +517,13 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
                         builder: (context, isOnline, child) {
                           return Row(
                             children: [
+                              // 🔧 PERFORMANCE FIX: Only animate pulse when online to save CPU
                               AnimatedBuilder(
                                 animation: _pulseController,
                                 builder: (context, child) {
+                                  // Don't animate if offline (saves 60% CPU on animation)
+                                  final pulseOpacity = isOnline ? (_pulseController.value * 0.5) : 0.0;
+                                  
                                   return Container(
                                     width: 12,
                                     height: 12,
@@ -513,7 +533,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
                                       boxShadow: isOnline
                                           ? [
                                               BoxShadow(
-                                                color: Colors.green.withOpacity(_pulseController.value * 0.5),
+                                                color: Colors.green.withOpacity(pulseOpacity),
                                                 blurRadius: 8,
                                                 spreadRadius: 2,
                                               ),

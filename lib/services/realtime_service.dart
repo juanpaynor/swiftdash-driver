@@ -725,14 +725,14 @@ class OptimizedRealtimeService {
         // to avoid duplicate location services fighting each other
         print('📍 Location tracking will be started by DriverFlowService');
         
-        // ✅ Send 'going_to_pickup' status via Ably automatically (FIRST real-time status to customer)
+        // ✅ Send 'going_to_pickup' status via Ably automatically (non-blocking)
         // This happens immediately after driver accepts, no need to wait for Navigate button
-        await AblyService().publishStatusUpdate(
+        AblyService().publishStatusUpdate(
           deliveryId: deliveryId,
           status: 'going_to_pickup',
           notes: 'Driver is heading to pickup location',
-        );
-        debugPrint('📢 Sent going_to_pickup status via Ably (automatic after acceptance)');
+        ).catchError((e) => debugPrint('⚠️ Ably publish failed: $e'));
+        debugPrint('📢 Sent going_to_pickup status via Ably (non-blocking, automatic after acceptance)');
         
         return true;
       } else {
@@ -793,6 +793,30 @@ class OptimizedRealtimeService {
   }
 
   // 🔹 9. CLEANUP & DISPOSAL
+  
+  /// Clean up channels for a specific delivery (call when delivery is complete)
+  Future<void> cleanupDeliveryChannels(String deliveryId) async {
+    try {
+      final channelsToRemove = <String>[];
+      
+      // Find all channels related to this delivery
+      for (final channelName in _activeChannels.keys) {
+        if (channelName.contains(deliveryId)) {
+          channelsToRemove.add(channelName);
+        }
+      }
+      
+      // Unsubscribe and remove each channel
+      for (final channelName in channelsToRemove) {
+        await _unsubscribeFromChannel(channelName);
+        debugPrint('🧹 Cleaned up realtime channel: $channelName');
+      }
+      
+      debugPrint('✅ Cleaned up ${channelsToRemove.length} realtime channel(s) for delivery: $deliveryId');
+    } catch (e) {
+      debugPrint('⚠️ Error cleaning up delivery channels: $e');
+    }
+  }
   
   /// Clean up all subscriptions and resources
   Future<void> dispose() async {
