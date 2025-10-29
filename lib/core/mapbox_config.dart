@@ -1,6 +1,10 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 class MapboxConfig {
-  // Using the token from MapboxService
-  static const String accessToken = 'pk.eyJ1Ijoic3dpZnRkYXNoIiwiYSI6ImNtZzNiazczczEzZmQycnIwdno1Z2NtYW0ifQ.9zBJVXVCBLU3eN1jZQTJUA';
+  // Load token from environment (secure)
+  static String get accessToken => 
+    dotenv.env['MAPBOX_ACCESS_TOKEN'] ?? 
+    (throw Exception('❌ MAPBOX_ACCESS_TOKEN not found in .env file'));
   
   // Map styles
   static const String streetStyle = 'mapbox://styles/swiftdash/cmh0gjtfm007h01r4ghel4u4m'; // SwiftDash custom style

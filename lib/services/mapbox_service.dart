@@ -1,9 +1,12 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class MapboxService {
-  // Your Mapbox token
-  static const String accessToken = 'pk.eyJ1Ijoic3dpZnRkYXNoIiwiYSI6ImNtZzNiazczczEzZmQycnIwdno1Z2NtYW0ifQ.9zBJVXVCBLU3eN1jZQTJUA';
+  // Load token from environment (secure)
+  static String get accessToken => 
+    dotenv.env['MAPBOX_ACCESS_TOKEN'] ?? 
+    (throw Exception('❌ MAPBOX_ACCESS_TOKEN not found in .env file'));
   
   // Philippines bounding box and center
   static const String philippinesBbox = '116.9283,4.5693,126.6043,21.1210';
