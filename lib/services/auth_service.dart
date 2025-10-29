@@ -96,6 +96,73 @@ class AuthService {
       rethrow;
     }
   }
+
+  /// Create driver profile for OTP-authenticated user
+  /// User is already authenticated via phone OTP, just need to create profiles
+  Future<void> createDriverProfileForOTPUser({
+    required String userId,
+    required String firstName,
+    required String lastName,
+    required String phoneNumber,
+    String? email,
+    String? vehicleTypeId,
+    String? licenseNumber,
+    String? vehicleModel,
+  }) async {
+    try {
+      // Create user profile
+      print('Creating user profile for OTP user: $phoneNumber');
+      final userProfileData = {
+        'id': userId,
+        'first_name': firstName,
+        'last_name': lastName,
+        'phone_number': phoneNumber,
+        'user_type': 'driver',
+        'status': 'active',
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      // Add email if provided (optional for OTP users)
+      if (email != null && email.isNotEmpty) {
+        userProfileData['email'] = email;
+      }
+
+      await _supabase.from('user_profiles').insert(userProfileData);
+      
+      print('User profile created, now creating driver profile');
+      
+      // Create driver profile
+      final driverProfileData = {
+        'id': userId,
+        'is_verified': true,  // Phone verified via OTP
+        'is_online': false,
+        'is_available': false,
+        'rating': 0.00,
+        'total_deliveries': 0,
+        'created_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+
+      // Add optional fields if provided
+      if (vehicleTypeId != null) {
+        driverProfileData['vehicle_type_id'] = vehicleTypeId;
+      }
+      if (licenseNumber != null) {
+        driverProfileData['license_number'] = licenseNumber;
+      }
+      if (vehicleModel != null) {
+        driverProfileData['vehicle_model'] = vehicleModel;
+      }
+
+      await _supabase.from('driver_profiles').insert(driverProfileData);
+      
+      print('Driver profile created successfully for OTP user');
+    } catch (e) {
+      print('Error creating driver profile for OTP user: $e');
+      rethrow;
+    }
+  }
   
   // Create driver profile in database
   Future<void> _createDriverProfile({

@@ -9,7 +9,7 @@ class DocumentUploadService {
 
   // Upload driver profile picture
   Future<String?> uploadDriverProfilePicture(File imageFile, String driverId) async {
-    return await _uploadToStorage(
+    return await uploadToStorage(
       imageFile: imageFile,
       bucket: 'driver_profile_pictures',
       fileName: '${driverId}_profile.jpg',
@@ -18,7 +18,7 @@ class DocumentUploadService {
 
   // Upload vehicle picture
   Future<String?> uploadVehiclePicture(File imageFile, String driverId) async {
-    return await _uploadToStorage(
+    return await uploadToStorage(
       imageFile: imageFile,
       bucket: 'driver_profile_pictures',
       fileName: '${driverId}_vehicle.jpg',
@@ -27,7 +27,7 @@ class DocumentUploadService {
 
   // Upload license picture
   Future<String?> uploadLicensePicture(File imageFile, String driverId) async {
-    return await _uploadToStorage(
+    return await uploadToStorage(
       imageFile: imageFile,
       bucket: 'License_pictures',
       fileName: '${driverId}_license.jpg',
@@ -36,7 +36,7 @@ class DocumentUploadService {
 
   // Upload LTFRB picture
   Future<String?> uploadLTFRBPicture(File imageFile, String driverId) async {
-    return await _uploadToStorage(
+    return await uploadToStorage(
       imageFile: imageFile,
       bucket: 'LTFRB_pictures',
       fileName: '${driverId}_ltfrb.jpg',
@@ -53,7 +53,7 @@ class DocumentUploadService {
       final bytes = await imageFile.readAsBytes();
       print('📦 Image size: ${(bytes.length / 1024).toStringAsFixed(2)} KB');
       
-      final url = await _uploadToStorage(
+      final url = await uploadToStorage(
         imageFile: imageFile,
         bucket: 'Proof_of_delivery',
         fileName: fileName,
@@ -77,7 +77,7 @@ class DocumentUploadService {
       final bytes = await imageFile.readAsBytes();
       print('📦 Image size: ${(bytes.length / 1024).toStringAsFixed(2)} KB');
       
-      final url = await _uploadToStorage(
+      final url = await uploadToStorage(
         imageFile: imageFile,
         bucket: 'pickup_photo',
         fileName: fileName,
@@ -91,8 +91,8 @@ class DocumentUploadService {
     }
   }
 
-  // Generic upload method
-  Future<String?> _uploadToStorage({
+  // Generic upload method (public for custom uploads)
+  Future<String?> uploadToStorage({
     required File imageFile,
     required String bucket,
     required String fileName,

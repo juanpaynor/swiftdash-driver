@@ -1146,6 +1146,24 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       print('🔄 Reloading delivery from database to get updated status...');
       await _driverFlow.refreshActiveDelivery();
       
+      // Get the updated delivery
+      final updatedDelivery = _driverFlow.activeDelivery;
+      
+      // ✅ FIX: Update route when status changes (especially after package collection)
+      if (updatedDelivery != null) {
+        print('🗺️ Updating route for new stage: ${updatedDelivery.currentStage.name}');
+        
+        // Reload and redraw route for new destination
+        await _loadDeliveryRoute(updatedDelivery);
+        
+        if (_routeData != null) {
+          await _drawRouteOnMap(_routeData!);
+          await _addDeliveryPins(updatedDelivery);
+          await _fitMapToDeliveryRoute(updatedDelivery);
+          print('✅ Route updated for ${updatedDelivery.currentStage.name}');
+        }
+      }
+      
       // Refresh the map state
       if (mounted) {
         setState(() {
@@ -1156,7 +1174,6 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         
         // Show updated status
-        final updatedDelivery = _driverFlow.activeDelivery;
         if (updatedDelivery != null) {
           print('✅ Delivery reloaded with status: ${updatedDelivery.status}');
         }
