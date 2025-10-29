@@ -170,7 +170,7 @@ class Delivery {
     
     // ✅ CONFIRMED with Customer App Team on Oct 21, 2025
     // See: RESPONSE_TO_DRIVER_APP_TEAM.md for official status values
-    // Database uses snake_case past tense: 'pickup_arrived', 'package_collected', 'in_transit'
+    // Database uses snake_case: 'at_pickup', 'package_collected', 'in_transit'
     final statusMap = {
       'pending': DeliveryStatus.pending,
       'driver_offered': DeliveryStatus.driverOffered,
@@ -179,9 +179,9 @@ class Delivery {
       'driverAssigned': DeliveryStatus.driverAssigned,
       'going_to_pickup': DeliveryStatus.goingToPickup,
       'goingToPickup': DeliveryStatus.goingToPickup,
-      'pickup_arrived': DeliveryStatus.pickupArrived,  // ✅ CORRECT per customer app
+      'at_pickup': DeliveryStatus.pickupArrived,       // ✅ CORRECT per customer app (Oct 29, 2025)
+      'pickup_arrived': DeliveryStatus.pickupArrived,  // ❌ LEGACY - still supported for backwards compatibility
       'pickupArrived': DeliveryStatus.pickupArrived,
-      'at_pickup': DeliveryStatus.pickupArrived,       // ❌ LEGACY - map to correct enum
       'atPickup': DeliveryStatus.pickupArrived,
       'package_collected': DeliveryStatus.packageCollected,  // ✅ CORRECT per customer app
       'packageCollected': DeliveryStatus.packageCollected,
@@ -437,7 +437,7 @@ extension DeliveryStatusExtension on DeliveryStatus {
       case DeliveryStatus.goingToPickup:
         return 'going_to_pickup';  // Optional status
       case DeliveryStatus.pickupArrived:
-        return 'pickup_arrived';  // ✅ CORRECT per customer app (NOT 'at_pickup')
+        return 'at_pickup';  // ✅ FIXED: Changed from 'pickup_arrived' to match customer app
       case DeliveryStatus.packageCollected:
         return 'package_collected';  // ✅ CORRECT per customer app (NOT 'picked_up')
       case DeliveryStatus.goingToDestination:

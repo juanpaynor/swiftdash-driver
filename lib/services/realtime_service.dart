@@ -4,6 +4,7 @@ import 'dart:async';
 import '../models/delivery.dart';
 import '../widgets/improved_delivery_offer_modal.dart';
 import 'optimized_location_service.dart';
+import 'ably_service.dart';
 
 class OptimizedRealtimeService {
   static final OptimizedRealtimeService _instance = OptimizedRealtimeService._internal();
@@ -723,6 +724,15 @@ class OptimizedRealtimeService {
         // Location tracking is started by DriverFlowService.acceptDeliveryOffer()
         // to avoid duplicate location services fighting each other
         print('📍 Location tracking will be started by DriverFlowService');
+        
+        // ✅ Send 'going_to_pickup' status via Ably automatically (FIRST real-time status to customer)
+        // This happens immediately after driver accepts, no need to wait for Navigate button
+        await AblyService().publishStatusUpdate(
+          deliveryId: deliveryId,
+          status: 'going_to_pickup',
+          notes: 'Driver is heading to pickup location',
+        );
+        debugPrint('📢 Sent going_to_pickup status via Ably (automatic after acceptance)');
         
         return true;
       } else {

@@ -11,6 +11,7 @@ import '../services/delivery_stage_manager.dart';
 import '../services/mapbox_service.dart';
 import '../services/driver_location_service.dart';
 import '../services/multi_stop_service.dart';
+import '../services/ably_service.dart';
 import '../widgets/pickup_confirmation_dialog.dart';
 import '../widgets/proof_of_delivery_dialog.dart';
 import '../widgets/multi_stop_widgets.dart';
@@ -1579,6 +1580,14 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
       
       print('✅ Package collected status updated: $response');
       
+      // ✅ Send real-time status update via Ably
+      await AblyService().publishStatusUpdate(
+        deliveryId: widget.delivery.id,
+        status: DeliveryStatus.packageCollected.databaseValue,
+        notes: 'Driver has collected the package',
+      );
+      debugPrint('📢 Sent package_collected status via Ably');
+      
       // Notify parent to refresh delivery state
       if (widget.onStatusChange != null) {
         widget.onStatusChange!(DeliveryStage.headingToDelivery);
@@ -1650,6 +1659,16 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
       }).eq('id', widget.delivery.id).select();
       
       print('✅ Database update response: $response');
+      
+      // ✅ Send real-time status update via Ably (at_pickup or at_destination)
+      await AblyService().publishStatusUpdate(
+        deliveryId: widget.delivery.id,
+        status: nextStatus.databaseValue,
+        notes: stage == DeliveryStage.headingToPickup 
+          ? 'Driver has arrived at pickup location' 
+          : 'Driver has arrived at delivery location',
+      );
+      debugPrint('📢 Sent ${nextStatus.databaseValue} status via Ably');
       
       // ✅ FIX: Notify parent to refresh delivery state immediately
       // The parent will reload the delivery from database and rebuild the panel
@@ -1820,6 +1839,14 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
       
       print('✅ Delivery cancelled successfully');
       
+      // ✅ Send real-time cancellation status via Ably
+      await AblyService().publishStatusUpdate(
+        deliveryId: widget.delivery.id,
+        status: DeliveryStatus.cancelled.databaseValue,
+        notes: 'Delivery has been cancelled by driver',
+      );
+      debugPrint('📢 Sent cancelled status via Ably');
+      
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1901,6 +1928,14 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
       }).eq('id', widget.delivery.id);
       
       print('✅ Delivery marked as complete');
+      
+      // ✅ Send real-time status update via Ably
+      await AblyService().publishStatusUpdate(
+        deliveryId: widget.delivery.id,
+        status: DeliveryStatus.delivered.databaseValue,
+        notes: 'Package has been delivered successfully',
+      );
+      debugPrint('📢 Sent delivered status via Ably');
       
       if (context.mounted) {
         // 🎊 PHASE 3: Trigger confetti celebration!

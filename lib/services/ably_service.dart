@@ -87,6 +87,39 @@ class AblyService {
     }
   }
 
+  /// Publish status update to Ably for real-time customer notifications
+  /// NOTE: Only send intermediate statuses via Ably (going_to_pickup, at_pickup, etc.)
+  /// Don't send: pending, driver_offered, driver_assigned (database only)
+  Future<void> publishStatusUpdate({
+    required String deliveryId,
+    required String status,
+    Map<String, dynamic>? driverLocation,
+    String? notes,
+  }) async {
+    try {
+      final channelName = 'tracking:$deliveryId';
+      final channel = getChannel(channelName);
+      
+      final payload = {
+        'delivery_id': deliveryId,
+        'status': status,
+        'timestamp': DateTime.now().toIso8601String(),
+        if (driverLocation != null) 'driver_location': driverLocation,
+        if (notes != null) 'notes': notes,
+      };
+      
+      await channel.publish(
+        name: 'status-update',  // ✅ Match customer app event name
+        data: payload,
+      );
+      
+      debugPrint('📢 Published status-update to $channelName: $status');
+    } catch (e) {
+      debugPrint('❌ Failed to publish status update: $e');
+      // Don't rethrow - status updates are non-critical, driver can continue
+    }
+  }
+
   Future<void> enterPresence(String deliveryId) async {
     try {
       final channelName = 'tracking:$deliveryId';

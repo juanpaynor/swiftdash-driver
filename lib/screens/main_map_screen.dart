@@ -17,6 +17,7 @@ import '../services/background_location_service.dart';
 import '../services/mapbox_service.dart' as mapbox_svc;
 import '../services/route_preview_service.dart';
 import '../services/multi_stop_service.dart';
+import '../services/ably_service.dart';
 import '../core/supabase_config.dart';
 import '../core/mapbox_config.dart';
 import '../widgets/driver_drawer.dart';
@@ -1060,6 +1061,26 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
         print('🗺️ Launched $app navigation');
+        
+        // ✅ Send 'in_transit' status via Ably when driver starts navigation to destination
+        // Note: 'going_to_pickup' is sent automatically when driver accepts delivery
+        if (_driverFlow.hasActiveDelivery && _driverFlow.activeDelivery != null) {
+          final delivery = _driverFlow.activeDelivery!;
+          final currentStage = delivery.currentStage;
+          
+          // Only send in_transit when heading to destination (after package collection)
+          if (currentStage == DeliveryStage.headingToDelivery) {
+            debugPrint('📢 Sending in_transit status via Ably');
+            await AblyService().publishStatusUpdate(
+              deliveryId: delivery.id,
+              status: 'in_transit',
+              driverLocation: _currentPosition != null ? {
+                'latitude': _currentPosition!.latitude,
+                'longitude': _currentPosition!.longitude,
+              } : null,
+            );
+          }
+        }
       } else {
         // Waze not installed - show helpful message
         if (app == 'waze' && context.mounted) {
