@@ -54,6 +54,10 @@ class ChatService {
 
   /// Get or create channel for delivery chat
   ably.RealtimeChannel _getChannel(String deliveryId) {
+    if (!_isInitialized || _ablyClient == null) {
+      throw Exception('ChatService not initialized. Call initialize() first.');
+    }
+    
     final channelName = 'delivery:$deliveryId:chat';
     
     if (_channels.containsKey(deliveryId)) {
@@ -69,6 +73,10 @@ class ChatService {
 
   /// Subscribe to chat for a delivery
   Stream<ChatMessage> subscribeToChat(String deliveryId) {
+    if (!_isInitialized) {
+      throw Exception('ChatService not initialized. Call initialize() first.');
+    }
+    
     if (_messageControllers.containsKey(deliveryId)) {
       return _messageControllers[deliveryId]!.stream;
     }

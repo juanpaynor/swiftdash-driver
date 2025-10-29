@@ -404,7 +404,12 @@ class OptimizedRealtimeService {
     }
   }
   
-  /// Update delivery status (critical event - immediate DB update + location storage)
+  /// Update delivery status following Ably-first architecture
+  /// 
+  /// **CRITICAL**: Per STATUS_UPDATE_FLOW_EXPLANATION.md:
+  /// - ALL status changes publish to Ably (real-time customer updates)
+  /// - Database ONLY updated for FINAL states: delivered, cancelled, failed
+  /// - Intermediate statuses (going_to_pickup, at_pickup, package_collected, in_transit) are Ably-only
   Future<bool> updateDeliveryStatus(String deliveryId, String status, {
     double? latitude,
     double? longitude,
@@ -412,33 +417,55 @@ class OptimizedRealtimeService {
     try {
       print('📋 Updating delivery status: $deliveryId -> $status');
       
-      final updateData = {
-        'status': status,  // ✅ Already snake_case from .databaseValue
-        'updated_at': DateTime.now().toIso8601String(),
-      };
+      // 🚀 STEP 1: ALWAYS publish to Ably for real-time customer updates
+      final driverLocation = (latitude != null && longitude != null) 
+        ? {'latitude': latitude, 'longitude': longitude}
+        : null;
       
-      // Add timestamp fields based on status (using snake_case)
-      switch (status) {
-        case 'picked_up':  // ✅ Match customer app expectations
-        case 'package_collected':  // Legacy support
-          updateData['picked_up_at'] = DateTime.now().toIso8601String();
-          break;
-        case 'in_transit':  // ✅ Match customer app expectations
-          updateData['in_transit_at'] = DateTime.now().toIso8601String();
-          break;
-        case 'delivered':
-          updateData['delivered_at'] = DateTime.now().toIso8601String();
-          updateData['completed_at'] = DateTime.now().toIso8601String();
-          break;
+      await AblyService().publishStatusUpdate(
+        deliveryId: deliveryId,
+        status: status,
+        driverLocation: driverLocation,
+      );
+      print('✅ Published status to Ably: $status');
+      
+      // 🗄️ STEP 2: Update database ONLY for final statuses
+      final isFinalStatus = ['delivered', 'cancelled', 'failed'].contains(status);
+      
+      if (isFinalStatus) {
+        print('💾 Final status detected - updating database: $status');
+        
+        final updateData = {
+          'status': status,
+          'updated_at': DateTime.now().toIso8601String(),
+        };
+        
+        // Add completion timestamps for final statuses
+        switch (status) {
+          case 'delivered':
+            updateData['delivered_at'] = DateTime.now().toIso8601String();
+            updateData['completed_at'] = DateTime.now().toIso8601String();
+            break;
+          case 'cancelled':
+            updateData['cancelled_at'] = DateTime.now().toIso8601String();
+            break;
+          case 'failed':
+            updateData['failed_at'] = DateTime.now().toIso8601String();
+            break;
+        }
+        
+        // Persist to database
+        await _supabase
+            .from('deliveries')
+            .update(updateData)
+            .eq('id', deliveryId);
+        
+        print('✅ Database updated for final status: $status');
+      } else {
+        print('⏭️ Intermediate status - skipping database update (Ably-only): $status');
       }
       
-      // Critical database update
-      await _supabase
-          .from('deliveries')
-          .update(updateData)
-          .eq('id', deliveryId);
-      
-      // Store location for critical events
+      // 📍 Store location for critical events (all statuses)
       if (latitude != null && longitude != null) {
         await storeLocationForCriticalEvent(
           eventType: status,
@@ -448,7 +475,7 @@ class OptimizedRealtimeService {
         );
       }
       
-      print('✅ Successfully updated delivery status');
+      print('✅ Successfully processed delivery status update: $status');
       return true;
     } catch (e) {
       print('❌ Error updating delivery status: $e');

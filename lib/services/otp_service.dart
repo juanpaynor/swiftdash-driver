@@ -17,24 +17,34 @@ class OTPService {
   /// ```
   Future<OTPResult> sendOTP({required String phoneNumber}) async {
     try {
-      // Format phone number (ensure +63 prefix for Philippines)
+      // Format phone number to E.164 format
       final formattedPhone = _formatPhoneNumber(phoneNumber);
       
-      print('Sending OTP to: $formattedPhone');
+      // Validate E.164 format before sending
+      if (!isValidPhoneNumber(phoneNumber)) {
+        print('❌ Invalid phone number format: $phoneNumber → $formattedPhone');
+        return OTPResult(
+          success: false,
+          message: 'Invalid phone number format. Must be a valid Philippine mobile number.',
+        );
+      }
       
-      // Use Supabase Auth's built-in phone OTP
+      print('📱 Sending OTP to E.164 formatted number: $formattedPhone');
+      print('   Original input: $phoneNumber');
+      
+      // Use Supabase Auth's built-in phone OTP (uses Twilio behind the scenes)
       await _supabase.auth.signInWithOtp(
         phone: formattedPhone,
       );
 
-      print('OTP sent successfully via Supabase Auth');
+      print('✅ OTP sent successfully via Supabase Auth');
 
       return OTPResult(
         success: true,
         message: 'OTP sent successfully to $formattedPhone',
       );
     } catch (e) {
-      print('Error sending OTP: $e');
+      print('❌ Error sending OTP: $e');
       return OTPResult(
         success: false,
         message: 'Error sending OTP: ${e.toString()}',
@@ -61,10 +71,11 @@ class OTPService {
     required String code,
   }) async {
     try {
-      // Format phone number
+      // Format phone number to E.164 format (must match the number OTP was sent to)
       final formattedPhone = _formatPhoneNumber(phoneNumber);
       
-      print('Verifying OTP for: $formattedPhone with code: $code');
+      print('🔍 Verifying OTP for E.164 number: $formattedPhone');
+      print('   Code: $code');
       
       // Use Supabase Auth's verifyOtp
       final response = await _supabase.auth.verifyOTP(
@@ -73,7 +84,7 @@ class OTPService {
         type: OtpType.sms,
       );
 
-      print('Verification Response: ${response.session != null ? "Success" : "Failed"}');
+      print('✅ Verification Response: ${response.session != null ? "Success" : "Failed"}');
 
       if (response.session != null) {
         return OTPResult(
@@ -88,7 +99,7 @@ class OTPService {
         );
       }
     } catch (e) {
-      print('Error verifying OTP: $e');
+      print('❌ Error verifying OTP: $e');
       return OTPResult(
         success: false,
         message: 'Error verifying OTP: ${e.toString()}',
@@ -96,23 +107,35 @@ class OTPService {
     }
   }
 
-  /// Format phone number to international format
-  /// Ensures +63 prefix for Philippines
+  /// Format phone number to E.164 international format for Twilio/Supabase
+  /// Ensures proper +63 prefix for Philippines
+  /// E.164 format: +[country code][subscriber number] (no spaces, dashes, parentheses)
   String _formatPhoneNumber(String phoneNumber) {
-    // Remove all whitespace and special characters
-    String cleaned = phoneNumber.replaceAll(RegExp(r'[\s\-\(\)]'), '');
+    // Remove ALL non-digit characters except leading +
+    String cleaned = phoneNumber.trim();
     
-    // If starts with 0, replace with +63
-    if (cleaned.startsWith('0')) {
-      cleaned = '+63${cleaned.substring(1)}';
+    // Extract only digits
+    String digitsOnly = cleaned.replaceAll(RegExp(r'[^\d]'), '');
+    
+    // Handle different input formats:
+    // 09171234567 → +639171234567
+    // 9171234567 → +639171234567
+    // 639171234567 → +639171234567
+    // +639171234567 → +639171234567 (already correct)
+    
+    if (cleaned.startsWith('+63')) {
+      // Already has +63, just clean it
+      return '+63${digitsOnly.substring(2)}';
+    } else if (digitsOnly.startsWith('63')) {
+      // Has 63 but no +
+      return '+${digitsOnly}';
+    } else if (digitsOnly.startsWith('0')) {
+      // Starts with 0 (local format)
+      return '+63${digitsOnly.substring(1)}';
+    } else {
+      // No country code at all
+      return '+63${digitsOnly}';
     }
-    
-    // If doesn't start with +, add +63
-    if (!cleaned.startsWith('+')) {
-      cleaned = '+63$cleaned';
-    }
-    
-    return cleaned;
   }
 
   /// Check if phone number format is valid

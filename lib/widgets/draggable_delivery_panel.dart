@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:confetti/confetti.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:math' as math;
 import '../models/delivery.dart';
 import '../models/delivery_stop.dart';
@@ -1737,22 +1738,44 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
 
   /// Open chat screen
   Future<void> _openChat() async {
-    final driver = await supabase
-        .from('drivers')
-        .select('id, name')
-        .eq('user_id', supabase.auth.currentUser!.id)
-        .single();
+    try {
+      // 🔧 Ensure ChatService is initialized
+      if (!ChatService().isInitialized) {
+        debugPrint('⚠️ ChatService not initialized - initializing now...');
+        final ablyKey = dotenv.env['ABLY_CLIENT_KEY'];
+        if (ablyKey == null || ablyKey.isEmpty) {
+          throw Exception('Ably key not found in .env');
+        }
+        await ChatService().initialize(ablyKey);
+      }
 
-    if (context.mounted) {
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => DeliveryChatScreen(
-            delivery: widget.delivery,
-            driverId: driver['id'],
-            driverName: driver['name'],
+      final driver = await supabase
+          .from('drivers')
+          .select('id, name')
+          .eq('user_id', supabase.auth.currentUser!.id)
+          .single();
+
+      if (context.mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => DeliveryChatScreen(
+              delivery: widget.delivery,
+              driverId: driver['id'],
+              driverName: driver['name'],
+            ),
           ),
-        ),
-      );
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error opening chat: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to open chat: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
   

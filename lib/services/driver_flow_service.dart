@@ -229,6 +229,11 @@ class DriverFlowService {
         // Start location tracking
         await _startLocationTracking();
 
+        // 🚀 AUTOMATIC STATUS UPDATE: Send "going_to_pickup" to customer app
+        // Per STATUS_UPDATE_FLOW_EXPLANATION.md - customer sees "Driver heading to pickup"
+        print('📢 Auto-sending going_to_pickup status to customer...');
+        await updateDeliveryStatus(context, DeliveryStatus.goingToPickup);
+
         // Show success and navigation options
         _showDeliveryAcceptedDialog(context, delivery);
         
