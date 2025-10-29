@@ -14,8 +14,6 @@ import 'screens/delivery_debug_screen.dart';
 import 'screens/debug_vehicle_types_screen.dart';
 import 'services/auth_service.dart';
 import 'services/driver_flow_service.dart';
-import 'services/ably_service.dart';
-import 'services/chat_service.dart';
 import 'models/driver.dart';
 import 'models/delivery.dart';
 import 'screens/improved_delivery_offers_screen.dart';
@@ -69,26 +67,18 @@ Future<void> _initializeServicesInBackground() async {
 }
 
 /// Initialize Ably service in background
+/// 🔧 PERFORMANCE FIX: Lazy initialization - only connect when driver goes online
 void _initAbly() {
-  Future(() async {
-    try {
-      final ablyKey = dotenv.env['ABLY_CLIENT_KEY'];
-      if (ablyKey != null && ablyKey.isNotEmpty) {
-        await AblyService().initialize(ablyKey);
-        print('✅ Ably service initialized');
-        
-        // Initialize Chat service with same Ably key
-        await ChatService().initialize(ablyKey);
-        print('✅ Chat service initialized');
-      } else {
-        print('⚠️ ABLY_CLIENT_KEY not found in .env file');
-        print('⚠️ Ably real-time tracking will not be available');
-      }
-    } catch (e) {
-      print('⚠️ Ably initialization failed: $e');
-      print('⚠️ App will continue with Supabase tracking only');
-    }
-  });
+  // Don't initialize Ably on startup - it will connect when driver goes online
+  // This saves 1-2 seconds of startup time and prevents network blocking
+  print('⏭️ Ably initialization deferred until driver goes online');
+  
+  // Just validate the API key is available
+  final ablyKey = dotenv.env['ABLY_CLIENT_KEY'];
+  if (ablyKey == null || ablyKey.isEmpty) {
+    print('⚠️ ABLY_CLIENT_KEY not found in .env file');
+    print('⚠️ Ably real-time tracking will not be available');
+  }
 }
 
 /// Initialize state managers in background

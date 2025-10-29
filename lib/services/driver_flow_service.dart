@@ -8,6 +8,7 @@ import '../services/realtime_service.dart';
 import '../services/auth_service.dart';
 import '../services/driver_location_service.dart';
 import '../services/ably_service.dart';
+import '../services/chat_service.dart';
 import '../services/idle_location_update_service.dart';
 import '../services/background_location_service.dart';
 import '../core/supabase_config.dart';
@@ -115,27 +116,9 @@ class DriverFlowService {
       // Update driver online status in both tables (includes location update)
       await _authService.updateOnlineStatus(true);
       
-      // ✅ FIX: Re-initialize Ably with clientId for presence features
-      try {
-        final ablyKey = dotenv.env['ABLY_CLIENT_KEY'];
-        if (ablyKey != null && ablyKey.isNotEmpty) {
-          await AblyService().initialize(ablyKey, clientId: _currentDriver!.id);
-          print('✅ Ably re-initialized with driver clientId for presence');
-          
-          // 🚨 FIX: Ensure Ably is connected
-          await AblyService().reconnect();
-          
-          // Verify connection state
-          final isConnected = AblyService().isConnected;
-          print('🔌 Ably connection state after reconnect: ${AblyService().connectionState}');
-          
-          if (!isConnected) {
-            print('⚠️ WARNING: Ably not connected after initialization - location tracking may fail');
-          }
-        }
-      } catch (e) {
-        print('⚠️ Could not re-initialize Ably: $e');
-      }
+      // 🔧 PERFORMANCE FIX: Initialize Ably in background (non-blocking)
+      // Don't await - let it connect in background while driver sees online status
+      _initializeAblyInBackground();
       
       // ✅ FIX: DON'T broadcast location when idle (no active delivery)
       // Location will be broadcast ONLY when driver has an active delivery
@@ -581,6 +564,43 @@ class DriverFlowService {
         backgroundColor: SwiftDashColors.successGreen,
       ),
     );
+  }
+
+  /// 🔧 PERFORMANCE FIX: Initialize Ably in background (non-blocking)
+  void _initializeAblyInBackground() {
+    if (_currentDriver == null) return;
+    
+    // Run in background without blocking UI
+    Future(() async {
+      try {
+        final ablyKey = dotenv.env['ABLY_CLIENT_KEY'];
+        if (ablyKey != null && ablyKey.isNotEmpty) {
+          print('🔌 Initializing Ably in background...');
+          await AblyService().initialize(ablyKey, clientId: _currentDriver!.id);
+          print('✅ Ably initialized with driver clientId: ${_currentDriver!.id}');
+          
+          // Initialize Chat service with same key
+          await ChatService().initialize(ablyKey);
+          print('✅ Chat service initialized');
+          
+          // Ensure Ably is connected
+          await AblyService().reconnect();
+          
+          // Verify connection state
+          final isConnected = AblyService().isConnected;
+          print('🔌 Ably connection state: ${AblyService().connectionState}');
+          
+          if (!isConnected) {
+            print('⚠️ WARNING: Ably not connected - will retry automatically');
+          } else {
+            print('✅ Ably and Chat services ready for real-time updates');
+          }
+        }
+      } catch (e) {
+        print('⚠️ Background Ably initialization failed: $e');
+        print('⚠️ Will retry on next connection attempt');
+      }
+    });
   }
 
   /// Dispose resources
