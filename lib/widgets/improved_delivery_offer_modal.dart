@@ -375,7 +375,7 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'You earn: ₱${(_calculateTotalFare() * 0.8).toStringAsFixed(2)}',
+                                'You earn: ₱${(_calculateTotalFare() * 0.84).toStringAsFixed(2)}',
                                 style: const TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w600,

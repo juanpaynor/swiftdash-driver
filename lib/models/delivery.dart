@@ -125,7 +125,9 @@ class Delivery {
   });
   
   // Calculate driver earnings (you can adjust this percentage)
-  double get driverEarnings => totalPrice * 0.75; // 75% to driver, 25% platform fee
+  /// Driver's earnings after 16% platform commission
+  /// Driver gets 84%, platform takes 16%
+  double get driverEarnings => totalPrice * 0.84;
   
   // Map database payment method to app payment method
   PaymentMethod get mappedPaymentMethod {

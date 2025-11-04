@@ -3,7 +3,7 @@ import '../models/driver.dart';
 import '../services/auth_service.dart';
 import '../services/driver_flow_service.dart';
 import '../core/supabase_config.dart';
-import '../screens/edit_profile_screen.dart';
+import '../screens/improved_edit_profile_screen.dart';
 
 class DriverDrawer extends StatelessWidget {
   const DriverDrawer({super.key});
@@ -170,7 +170,7 @@ class DriverDrawer extends StatelessWidget {
                     Navigator.of(context).pop();
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (context) => const EditProfileScreen(),
+                        builder: (context) => const ImprovedEditProfileScreen(),
                       ),
                     );
                   },

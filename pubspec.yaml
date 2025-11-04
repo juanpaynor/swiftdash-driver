@@ -36,9 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   supabase_flutter: ^2.10.2
   mapbox_maps_flutter: ^2.0.0
-  # MapLibre Navigation for professional turn-by-turn guidance
-  maplibre_gl: ^0.20.0
-  # MapLibre Navigation support for routing and directions
+  # Turf for geospatial calculations
   turf: ^0.0.10
   http: ^1.1.0
   vibration: ^2.0.0

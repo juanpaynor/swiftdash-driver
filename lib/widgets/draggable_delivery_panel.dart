@@ -897,13 +897,13 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
           ),
           child: Row(
             children: [
-              // Earnings
+              // Earnings (Driver's cut after 16% platform commission)
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'EARNING',
+                      'YOUR EARNING',
                       style: TextStyle(
                         fontSize: 10,
                         color: Colors.grey[600],
@@ -913,11 +913,18 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '₱${delivery.totalPrice.toStringAsFixed(2)}',
+                      '₱${delivery.driverEarnings.toStringAsFixed(2)}',
                       style: const TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
-                        color: Colors.black87,
+                        color: SwiftDashColors.successGreen,
+                      ),
+                    ),
+                    Text(
+                      'Total: ₱${delivery.totalPrice.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey[600],
                       ),
                     ),
                   ],
@@ -1575,14 +1582,21 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
         return;
       }
       
-      // 🚀 ABLY-FIRST: Send status update via Ably ONLY (no database for intermediate status)
-      // Database is ONLY updated for final statuses (delivered, cancelled, failed)
+      // 🚀 Update database with package_collected status and photo
+      await supabase.from('deliveries').update({
+        'status': DeliveryStatus.packageCollected.databaseValue,
+        'pickup_proof_photo_url': photoUrl,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', widget.delivery.id);
+      print('✅ Updated database: package_collected status + photo URL');
+      
+      // Also send status update via Ably for real-time customer updates
       await AblyService().publishStatusUpdate(
         deliveryId: widget.delivery.id,
         status: DeliveryStatus.packageCollected.databaseValue,
         notes: 'Driver has collected the package',
       );
-      print('✅ Sent package_collected status via Ably (intermediate status - no DB update)');
+      print('✅ Sent package_collected status via Ably');
       
       // Store pickup proof photo URL if available (separate from status)
       if (photoUrl.isNotEmpty) {
@@ -1620,19 +1634,11 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
     }
   }
   
-  /// Handle "Arrived" button tap
+  /// Handle "Arrived at Pickup" button tap
+  /// Opens pickup modal immediately instead of requiring two separate taps
   Future<void> _handleArrivedButton(DeliveryStage stage) async {
     try {
-      // Determine the next status
-      final nextStatus = stage == DeliveryStage.headingToPickup
-          ? DeliveryStatus.pickupArrived
-          : DeliveryStatus.atDestination;
-      
-      print('📍 Driver marking arrived: $nextStatus');
-      print('📍 Using database value: ${nextStatus.databaseValue}');
-      
       // 🔒 RACE CONDITION FIX: Check current status before updating
-      // Prevents overwriting customer cancellation with driver status update
       final currentDelivery = await supabase
           .from('deliveries')
           .select('status')
@@ -1649,13 +1655,18 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
             ),
           );
         }
-        // Trigger refresh to close panel
         widget.onStatusChange?.call(stage);
         return;
       }
       
-      // 🚀 ABLY-FIRST: Send status update via Ably ONLY (no database for intermediate status)
-      // Arrival statuses (at_pickup, at_destination) are intermediate - NOT stored in database
+      // Determine the next status
+      final nextStatus = stage == DeliveryStage.headingToPickup
+          ? DeliveryStatus.pickupArrived
+          : DeliveryStatus.atDestination;
+      
+      print('📍 Driver marking arrived: $nextStatus');
+      
+      // 🚀 Send status update via Ably for real-time customer updates
       await AblyService().publishStatusUpdate(
         deliveryId: widget.delivery.id,
         status: nextStatus.databaseValue,
@@ -1663,31 +1674,34 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
           ? 'Driver has arrived at pickup location' 
           : 'Driver has arrived at delivery location',
       );
-      print('✅ Sent ${nextStatus.databaseValue} status via Ably (intermediate status - no DB update)');
+      print('✅ Sent ${nextStatus.databaseValue} status via Ably');
       
-      // ✅ FIX: Notify parent to refresh delivery state immediately
-      // The parent will reload the delivery from database and rebuild the panel
-      // with the updated status, which will show the correct button state
-      if (widget.onStatusChange != null) {
-        // Pass current stage - parent will reload delivery and determine new stage from updated status
-        widget.onStatusChange!(stage);
-      }
+      // Update database in background (don't await - fire and forget)
+      supabase.from('deliveries').update({
+        'status': nextStatus.databaseValue,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', widget.delivery.id);
       
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              stage == DeliveryStage.headingToPickup 
-                ? '✅ Marked as arrived at pickup - tap to confirm package collection' 
-                : '✅ Marked as arrived at delivery - tap to complete',
+      // ✅ IMPROVED UX: If arrived at pickup, immediately open pickup modal
+      // No need to make driver tap twice!
+      if (stage == DeliveryStage.headingToPickup) {
+        print('🎯 Opening pickup confirmation modal immediately...');
+        await _handlePackageReceived();
+      } else {
+        // For delivery arrival, just show success message
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✅ Marked as arrived at delivery - tap to complete'),
+              backgroundColor: SwiftDashColors.successGreen,
+              duration: Duration(seconds: 3),
             ),
-            backgroundColor: SwiftDashColors.successGreen,
-            duration: const Duration(seconds: 3),
-          ),
-        );
+          );
+        }
+        
+        // Notify parent to refresh
+        widget.onStatusChange?.call(stage);
       }
-      
-      print('✅ Status updated to: $nextStatus - parent will refresh delivery');
     } catch (e) {
       print('❌ Error updating arrival status: $e');
       if (context.mounted) {
@@ -1741,11 +1755,14 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
         await ChatService().initialize(ablyKey);
       }
 
+      // Query driver_profiles table (not 'drivers')
       final driver = await supabase
-          .from('drivers')
-          .select('id, name')
+          .from('driver_profiles')
+          .select('id, first_name, last_name')
           .eq('user_id', supabase.auth.currentUser!.id)
           .single();
+
+      final String driverName = '${driver['first_name']} ${driver['last_name']}';
 
       if (context.mounted) {
         await Navigator.of(context).push(
@@ -1753,7 +1770,7 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
             builder: (context) => DeliveryChatScreen(
               delivery: widget.delivery,
               driverId: driver['id'],
-              driverName: driver['name'],
+              driverName: driverName,
             ),
           ),
         );

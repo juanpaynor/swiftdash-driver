@@ -1054,57 +1054,270 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Choose Navigation'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Navigate to:',
-              style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              address,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-            ),
-          ],
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFF6B35).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.navigation,
+                      color: Color(0xFFFF6B35),
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Choose Navigation',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'Select your preferred navigation',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 20),
+              
+              // Destination Address
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey[300]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.location_on, color: Colors.grey[700], size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        address,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              const SizedBox(height: 24),
+              
+              // 🌟 RECOMMENDED: SwiftDash Navigation (Large Card)
+              Container(
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFFF6B35), Color(0xFFFF8C42)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFFF6B35).withOpacity(0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () {
+                      Navigator.pop(context);
+                      _startProfessionalNavigation(lat, lng, delivery);
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.navigation,
+                              color: Colors.white,
+                              size: 32,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      'SwiftDash Navigation',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Icon(Icons.star, color: Colors.white, size: 16),
+                                  ],
+                                ),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Recommended • Turn-by-turn • Voice guidance',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(
+                            Icons.arrow_forward_ios,
+                            color: Colors.white,
+                            size: 20,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Divider with "OR" text
+              Row(
+                children: [
+                  Expanded(child: Divider(color: Colors.grey[300])),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      'OR USE EXTERNAL APP',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey[600],
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  Expanded(child: Divider(color: Colors.grey[300])),
+                ],
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // External Navigation Options (Compact)
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildExternalNavButton(
+                      'Google Maps',
+                      Icons.map,
+                      Colors.green,
+                      () {
+                        Navigator.pop(context);
+                        _launchNavigation('google', lat, lng);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildExternalNavButton(
+                      'Waze',
+                      Icons.directions_car,
+                      Colors.blue,
+                      () {
+                        Navigator.pop(context);
+                        _launchNavigation('waze', lat, lng);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              
+              const SizedBox(height: 16),
+              
+              // Cancel Button
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(
+                    fontSize: 15,
+                    color: Colors.grey,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+      ),
+    );
+  }
+  
+  /// Build external navigation button (compact style)
+  Widget _buildExternalNavButton(String label, IconData icon, Color color, VoidCallback onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey[300]!),
+            borderRadius: BorderRadius.circular(12),
           ),
-          // 🧭 NEW: Professional in-app navigation
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _startProfessionalNavigation(lat, lng, delivery);
-            },
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.navigation, size: 16, color: Theme.of(context).primaryColor),
-                const SizedBox(width: 4),
-                const Text('SwiftDash Navigation'),
-              ],
-            ),
+          child: Column(
+            children: [
+              Icon(icon, color: color, size: 28),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _launchNavigation('google', lat, lng);
-            },
-            child: const Text('Google Maps'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _launchNavigation('waze', lat, lng);
-            },
-            child: const Text('Waze'),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1651,16 +1864,25 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       _currentPosition = position;
       print('📍 Current position: ${position.latitude}, ${position.longitude}');
       
-      // 🎯 USE MAPBOX LOCATION PUCK instead of custom annotations
+      // 🎯 USE MAPBOX LOCATION PUCK with navigation-style chevron/arrow
+      final navigationArrowImage = await _createNavigationArrowImage();
+      
       await _mapboxMap!.location.updateSettings(LocationComponentSettings(
         enabled: true,
-        puckBearingEnabled: true, // Show bearing/direction
+        puckBearingEnabled: true, // Show bearing/direction for navigation
         pulsingEnabled: true, // Pulsing animation
-        pulsingColor: Colors.blue.value,
-        pulsingMaxRadius: 20.0,
+        pulsingColor: const Color(0xFFFF6B35).value, // SwiftDash orange pulse
+        pulsingMaxRadius: 30.0,
+        locationPuck: LocationPuck(
+          locationPuck2D: LocationPuck2D(
+            topImage: navigationArrowImage,
+            bearingImage: navigationArrowImage,
+            shadowImage: null,
+          ),
+        ),
       ));
       
-      print('✅ Mapbox location puck enabled successfully');
+      print('✅ Mapbox navigation puck enabled successfully');
       
       // Center the map on the driver's location
       await _mapboxMap!.flyTo(
@@ -2619,8 +2841,16 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         await _clearOfferVisualization();
       }
       
-      // Clear map visualization
+      // Clear map visualization (polylines, markers)
       await _clearDeliveryRoute();
+      
+      // 🎯 DISABLE LOCATION PUCK when delivery is cancelled
+      if (_mapboxMap != null) {
+        await _mapboxMap!.location.updateSettings(LocationComponentSettings(
+          enabled: false,
+        ));
+        print('✅ Location puck disabled after cancellation');
+      }
       
       // Stop location tracking services
       await BackgroundLocationService.stopLocationTracking();
@@ -2652,7 +2882,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         );
       }
       
-      print('✅ Delivery cancellation handled - panel should close');
+      print('✅ Delivery cancellation handled - panel, puck, and routes cleared');
     } catch (e) {
       print('❌ Error handling delivery cancellation: $e');
     }
@@ -2688,5 +2918,47 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     } catch (e) {
       print('❌ Error clearing delivery route: $e');
     }
+  }
+  
+  /// Create a navigation-style arrow/chevron image for the location puck
+  /// Returns a blue chevron pointing upward (bearing will rotate it)
+  Future<Uint8List> _createNavigationArrowImage() async {
+    const size = 80.0; // Size of the canvas
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, size, size));
+    final paint = Paint()
+      ..color = const Color(0xFF1E88E5) // Material blue
+      ..style = PaintingStyle.fill;
+    
+    final borderPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4.0;
+    
+    // Create a navigation chevron/arrow path
+    final path = Path();
+    final centerX = size / 2;
+    final centerY = size / 2;
+    
+    // Chevron pointing upward
+    path.moveTo(centerX, centerY - 25); // Top point
+    path.lineTo(centerX + 15, centerY - 5); // Right upper
+    path.lineTo(centerX + 8, centerY - 5); // Right inner
+    path.lineTo(centerX + 8, centerY + 25); // Right bottom
+    path.lineTo(centerX - 8, centerY + 25); // Left bottom
+    path.lineTo(centerX - 8, centerY - 5); // Left inner
+    path.lineTo(centerX - 15, centerY - 5); // Left upper
+    path.close();
+    
+    // Draw the arrow with white border
+    canvas.drawPath(path, borderPaint);
+    canvas.drawPath(path, paint);
+    
+    // Convert to image
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    
+    return byteData!.buffer.asUint8List();
   }
 }
