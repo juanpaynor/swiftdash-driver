@@ -45,9 +45,31 @@ class OTPService {
       );
     } catch (e) {
       print('❌ Error sending OTP: $e');
+      
+      // Provide specific error messages based on error type
+      String errorMessage = 'Failed to send OTP';
+      
+      if (e is AuthException) {
+        if (e.message.contains('Phone provider is disabled') || 
+            e.message.contains('not enabled')) {
+          errorMessage = 'Phone authentication is not configured. Please contact support.';
+          print('🚨 CRITICAL: Phone provider not enabled in Supabase dashboard!');
+          print('   Go to: https://supabase.com/dashboard → Auth → Providers → Enable Phone');
+        } else if (e.message.contains('Invalid phone number')) {
+          errorMessage = 'Invalid phone number format. Use format: 09171234567';
+        } else if (e.message.contains('Twilio')) {
+          errorMessage = 'SMS service configuration error. Please contact support.';
+          print('🚨 CRITICAL: Twilio credentials not configured in Supabase!');
+        } else {
+          errorMessage = e.message;
+        }
+      } else if (e.toString().contains('NetworkException')) {
+        errorMessage = 'Network error. Please check your internet connection.';
+      }
+      
       return OTPResult(
         success: false,
-        message: 'Error sending OTP: ${e.toString()}',
+        message: errorMessage,
       );
     }
   }
@@ -100,9 +122,27 @@ class OTPService {
       }
     } catch (e) {
       print('❌ Error verifying OTP: $e');
+      
+      // Provide specific error messages
+      String errorMessage = 'Failed to verify OTP';
+      
+      if (e is AuthException) {
+        if (e.message.contains('Invalid token') || 
+            e.message.contains('invalid') || 
+            e.message.contains('expired')) {
+          errorMessage = 'Invalid or expired OTP code. Please try again.';
+        } else if (e.message.contains('Token has expired')) {
+          errorMessage = 'OTP code has expired. Please request a new code.';
+        } else {
+          errorMessage = e.message;
+        }
+      } else if (e.toString().contains('NetworkException')) {
+        errorMessage = 'Network error. Please check your internet connection.';
+      }
+      
       return OTPResult(
         success: false,
-        message: 'Error verifying OTP: ${e.toString()}',
+        message: errorMessage,
       );
     }
   }
@@ -142,8 +182,16 @@ class OTPService {
   /// Must be 10 digits after country code (e.g., +639171234567)
   bool isValidPhoneNumber(String phoneNumber) {
     final formatted = _formatPhoneNumber(phoneNumber);
-    // Philippine mobile numbers: +63 followed by 10 digits (9XXXXXXXXX)
-    return RegExp(r'^\+639\d{9}$').hasMatch(formatted);
+    
+    // Philippine mobile numbers: +63 followed by 10 digits starting with 9
+    // Examples: +639171234567, +639281234567, +639051234567
+    final isMobile = RegExp(r'^\+639\d{9}$').hasMatch(formatted);
+    
+    // Philippine landlines: +63 2 followed by 7-8 digits (Metro Manila)
+    // or +63 followed by area code and local number
+    final isLandline = RegExp(r'^\+632\d{7,8}$').hasMatch(formatted);
+    
+    return isMobile || isLandline;
   }
 }
 

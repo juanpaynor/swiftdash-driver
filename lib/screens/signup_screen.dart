@@ -2,9 +2,6 @@ import 'package:flutter/material.dart';
 import '../core/supabase_config.dart';
 import '../services/auth_service.dart';
 import '../services/vehicle_type_service.dart';
-import '../services/otp_service.dart';
-import '../screens/otp_verification_screen.dart';
-
 import '../models/vehicle_type.dart';
 
 class SignupScreen extends StatefulWidget {
@@ -145,94 +142,33 @@ class _SignupScreenState extends State<SignupScreen> {
     });
 
     try {
-      // Step 1: Validate phone number format
-      final otpService = OTPService();
-      final phoneNumber = _phoneController.text.trim();
-      
-      if (!otpService.isValidPhoneNumber(phoneNumber)) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Invalid phone number format. Please use Philippine mobile number (e.g., 09171234567)'),
-              backgroundColor: SwiftDashColors.dangerRed,
-            ),
-          );
-        }
-        return;
-      }
+      // Direct email/password signup (no OTP)
+      final response = await _authService.signUpDriver(
+        email: _emailController.text.trim(),
+        password: _passwordController.text.trim(),
+        firstName: _firstNameController.text.trim(),
+        lastName: _lastNameController.text.trim(),
+        phoneNumber: _phoneController.text.trim(),
+        vehicleTypeId: _selectedVehicleType?.id,
+        licenseNumber: _licenseNumberController.text.trim().isNotEmpty 
+            ? _licenseNumberController.text.trim() 
+            : null,
+        vehicleModel: _vehicleModelController.text.trim().isNotEmpty 
+            ? _vehicleModelController.text.trim() 
+            : null,
+      );
 
-      // Step 2: Send OTP to phone number via Supabase Auth
-      final sendResult = await otpService.sendOTP(phoneNumber: phoneNumber);
-      
-      if (!sendResult.success) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to send OTP: ${sendResult.message}'),
-              backgroundColor: SwiftDashColors.dangerRed,
-            ),
-          );
-        }
-        return;
-      }
-
-      // Step 3: Navigate to OTP verification screen
-      if (mounted) {
-        final result = await Navigator.push<Map<String, dynamic>>(
-          context,
-          MaterialPageRoute(
-            builder: (context) => OTPVerificationScreen(
-              phoneNumber: phoneNumber,
-              registrationData: {
-                'email': _emailController.text.trim(),
-                'firstName': _firstNameController.text.trim(),
-                'lastName': _lastNameController.text.trim(),
-                'phoneNumber': phoneNumber,
-                'vehicleTypeId': _selectedVehicleType?.id,
-                'licenseNumber': _licenseNumberController.text.trim().isNotEmpty 
-                    ? _licenseNumberController.text.trim() 
-                    : null,
-                'vehicleModel': _vehicleModelController.text.trim().isNotEmpty 
-                    ? _vehicleModelController.text.trim() 
-                    : null,
-              },
-            ),
+      if (mounted && response.user != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Account created successfully! Please log in.'),
+            backgroundColor: SwiftDashColors.successGreen,
+            duration: Duration(seconds: 3),
           ),
         );
-
-        // Step 4: If OTP verified, create driver profile
-        // User is already authenticated via OTP, just need to create profiles
-        if (result != null && result['verified'] == true && result['userId'] != null) {
-          await _authService.createDriverProfileForOTPUser(
-            userId: result['userId'],
-            firstName: _firstNameController.text.trim(),
-            lastName: _lastNameController.text.trim(),
-            phoneNumber: phoneNumber,
-            email: _emailController.text.trim().isNotEmpty 
-                ? _emailController.text.trim() 
-                : null,
-            vehicleTypeId: _selectedVehicleType?.id,
-            licenseNumber: _licenseNumberController.text.trim().isNotEmpty 
-                ? _licenseNumberController.text.trim() 
-                : null,
-            vehicleModel: _vehicleModelController.text.trim().isNotEmpty 
-                ? _vehicleModelController.text.trim() 
-                : null,
-          );
-
-          if (mounted) {
-            // Show success message
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Account created successfully! Welcome to SwiftDash!'),
-                backgroundColor: SwiftDashColors.successGreen,
-                duration: Duration(seconds: 3),
-              ),
-            );
-
-            // AuthWrapper will automatically detect the logged-in user and navigate to dashboard
-          }
-        }
+        
+        // Navigate back to login
+        Navigator.pop(context);
       }
     } catch (error) {
       if (mounted) {
