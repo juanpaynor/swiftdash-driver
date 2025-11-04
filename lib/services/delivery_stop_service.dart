@@ -1,9 +1,13 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/delivery_stop.dart';
+import '../models/cash_remittance.dart';
+import 'driver_earnings_service.dart';
+import 'ably_service.dart';
 
 /// Service for managing delivery stops in multi-stop deliveries
 class DeliveryStopService {
   final SupabaseClient _supabase = Supabase.instance.client;
+  final AblyService _ablyService = AblyService();
   
   /// Get all stops for a delivery, ordered by stop number
   Future<List<DeliveryStop>> getDeliveryStops(String deliveryId) async {
@@ -70,6 +74,14 @@ class DeliveryStopService {
   /// Mark driver as arrived at a stop
   Future<void> markStopArrived(String stopId) async {
     try {
+      // Get stop details BEFORE update
+      final stopBefore = await _supabase
+          .from('delivery_stops')
+          .select()
+          .eq('id', stopId)
+          .single();
+      
+      // Update database
       await _supabase
           .from('delivery_stops')
           .update({
@@ -78,6 +90,15 @@ class DeliveryStopService {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', stopId);
+      
+      // Publish to Ably for customer app
+      await _ablyService.publishStopUpdate(
+        deliveryId: stopBefore['delivery_id'],
+        stopId: stopId,
+        stopNumber: stopBefore['stop_number'],
+        stopType: stopBefore['stop_type'],
+        status: 'in_progress',
+      );
     } catch (e) {
       throw Exception('Failed to mark stop as arrived: $e');
     }
@@ -92,6 +113,13 @@ class DeliveryStopService {
     String? completionNotes,
   }) async {
     try {
+      // Get stop details BEFORE update
+      final stopBefore = await _supabase
+          .from('delivery_stops')
+          .select()
+          .eq('id', stopId)
+          .single();
+      
       // Update the stop status
       await _supabase
           .from('delivery_stops')
@@ -104,6 +132,17 @@ class DeliveryStopService {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', stopId);
+      
+      // Publish to Ably for customer app
+      await _ablyService.publishStopUpdate(
+        deliveryId: deliveryId,
+        stopId: stopId,
+        stopNumber: stopBefore['stop_number'],
+        stopType: stopBefore['stop_type'],
+        status: 'completed',
+        proofPhotoUrl: proofPhotoUrl,
+        completionNotes: completionNotes,
+      );
       
       // Get current stop index and increment it
       final deliveryResponse = await _supabase
@@ -204,6 +243,14 @@ class DeliveryStopService {
     required String reason,
   }) async {
     try {
+      // Get stop details BEFORE update
+      final stopBefore = await _supabase
+          .from('delivery_stops')
+          .select()
+          .eq('id', stopId)
+          .single();
+      
+      // Update database
       await _supabase
           .from('delivery_stops')
           .update({
@@ -212,6 +259,16 @@ class DeliveryStopService {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', stopId);
+      
+      // Publish to Ably for customer app
+      await _ablyService.publishStopUpdate(
+        deliveryId: stopBefore['delivery_id'],
+        stopId: stopId,
+        stopNumber: stopBefore['stop_number'],
+        stopType: stopBefore['stop_type'],
+        status: 'failed',
+        completionNotes: reason,
+      );
     } catch (e) {
       throw Exception('Failed to mark stop as failed: $e');
     }
@@ -220,24 +277,52 @@ class DeliveryStopService {
   /// Complete the entire delivery
   Future<void> _completeDelivery(String deliveryId) async {
     try {
-      await _supabase
+      // Get delivery details for earnings calculation
+      final deliveryResponse = await _supabase
           .from('deliveries')
-          .update({
-            'status': 'delivered',
-            'completed_at': DateTime.now().toIso8601String(),
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', deliveryId);
+          .select('driver_id, total_price, payment_method, tip_amount, vehicle_type_id, distance_km')
+          .eq('id', deliveryId)
+          .single();
       
-      // Make driver available again
-      final user = _supabase.auth.currentUser;
-      if (user != null) {
-        await _supabase
-            .from('driver_profiles')
-            .update({'is_available': true})
-            .eq('id', user.id);
+      final driverId = deliveryResponse['driver_id'] as String;
+      final totalPrice = (deliveryResponse['total_price'] as num).toDouble();
+      final paymentMethodStr = deliveryResponse['payment_method'] as String?;
+      final tipAmount = (deliveryResponse['tip_amount'] as num?)?.toDouble() ?? 0.0;
+      
+      // Parse payment method
+      PaymentMethod paymentMethod;
+      try {
+        paymentMethod = PaymentMethod.values.firstWhere(
+          (e) => e.toString().split('.').last == paymentMethodStr,
+          orElse: () => PaymentMethod.cash,
+        );
+      } catch (e) {
+        paymentMethod = PaymentMethod.cash;
       }
+      
+      // Record earnings BEFORE marking complete
+      final earningsService = DriverEarningsService();
+      await earningsService.recordDeliveryEarnings(
+        driverId: driverId,
+        deliveryId: deliveryId,
+        totalPrice: totalPrice,
+        paymentMethod: paymentMethod,
+        tips: tipAmount,
+      );
+      
+      // ⭐ Use fleet-safe helper function (Added Nov 3, 2025)
+      // This handles: delivery completion, driver status reset, and fleet vehicle reset
+      await _supabase.rpc(
+        'complete_delivery_safe',
+        params: {
+          'p_delivery_id': deliveryId,
+          'p_driver_id': driverId,
+        },
+      );
+      
+      print('✅ Delivery completed and earnings recorded: ₱$totalPrice');
     } catch (e) {
+      print('Error completing delivery: $e');
       throw Exception('Failed to complete delivery: $e');
     }
   }

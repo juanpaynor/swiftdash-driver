@@ -16,14 +16,15 @@ import '../services/realtime_service.dart';
 import '../services/background_location_service.dart';
 import '../services/mapbox_service.dart' as mapbox_svc;
 import '../services/route_preview_service.dart';
-import '../services/multi_stop_service.dart';
 import '../services/ably_service.dart';
+import '../services/navigation_service.dart'; // NEW: Professional navigation
 import '../core/supabase_config.dart';
 import '../core/mapbox_config.dart';
 import '../widgets/driver_drawer.dart';
 import '../widgets/driver_status_bottom_sheet.dart';
 import '../widgets/earnings_modal.dart';
 import '../widgets/draggable_delivery_panel.dart';
+import '../widgets/navigation_instruction_panel.dart'; // NEW: Navigation UI
 import '../services/navigation_manager.dart';
 import '../services/optimized_state_manager.dart';
 import '../widgets/optimized_state_widgets.dart';
@@ -62,8 +63,10 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   CircleAnnotationManager? _dropoffMarkerManager;
   PointAnnotationManager? _multiStopNumberedMarkers; // 🚦 For numbered multi-stop markers
   
-  // Multi-stop service
-  final MultiStopService _multiStopService = MultiStopService();
+  // 🧭 NEW: Professional navigation service
+  final NavigationService _navigationService = NavigationService.instance;
+  bool _isNavigating = false;
+  bool _isNavigationCameraLocked = true; // Camera auto-follow toggle during navigation
   
   // Route data for active delivery (old mapbox service)
   mapbox_svc.RouteData? _routeData;
@@ -474,6 +477,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
             key: const ValueKey("mapWidget"),
             styleUri: MapboxConfig.navigationNightStyle, // Using navigation night theme for drivers
             onMapCreated: _onMapCreated,
+            onCameraChangeListener: _isNavigating ? _onCameraChange : null, // Detect manual camera movement during navigation
           ),
           
           // Top bar with menu and online status
@@ -628,6 +632,34 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
               onCallCustomer: () => _callCustomer(_driverFlow.activeDelivery!),
               onNavigate: () => _showNavigationOptions(_driverFlow.activeDelivery!),
               onStatusChange: (newStage) => _handleDeliveryStatusChange(newStage),
+            ),
+          
+          // 🧭 NEW: Professional Navigation Instructions Panel
+          if (_isNavigating)
+            NavigationInstructionPanel(
+              navigationService: _navigationService,
+              onCloseNavigation: () async {
+                await _navigationService.stopNavigation();
+                setState(() {
+                  _isNavigating = false;
+                });
+                // 🎥 Exit navigation camera mode when user closes
+                await _disableNavigationCameraMode();
+              },
+              showCompactMode: _driverFlow.hasActiveDelivery, // Compact when delivery panel is shown
+            ),
+          
+          // 🎯 NEW: Re-center button (appears when camera is unlocked during navigation)
+          if (_isNavigating && !_isNavigationCameraLocked)
+            Positioned(
+              bottom: _driverFlow.hasActiveDelivery ? 420 : 120,
+              right: 20,
+              child: FloatingActionButton(
+                onPressed: _recenterNavigationCamera,
+                backgroundColor: Colors.blue,
+                tooltip: 'Re-center on your location',
+                child: const Icon(Icons.my_location, color: Colors.white),
+              ),
             ),
           
           // Driver status and online/offline control (hide when delivery active or offer shown)
@@ -1023,7 +1055,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Choose Navigation App'),
+        title: const Text('Choose Navigation'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1042,6 +1074,21 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
+          ),
+          // 🧭 NEW: Professional in-app navigation
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _startProfessionalNavigation(lat, lng, delivery);
+            },
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.navigation, size: 16, color: Theme.of(context).primaryColor),
+                const SizedBox(width: 4),
+                const Text('SwiftDash Navigation'),
+              ],
+            ),
           ),
           TextButton(
             onPressed: () {
@@ -1122,6 +1169,268 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
           ),
         );
       }
+    }
+  }
+  
+  /// 🧭 NEW: Start professional in-app navigation using NavigationService
+  Future<void> _startProfessionalNavigation(double lat, double lng, Delivery delivery) async {
+    if (_currentPosition == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Current location not available. Please try again.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+    
+    try {
+      // Determine if this is pickup or delivery phase
+      final isPickupPhase = delivery.status == DeliveryStatus.driverAssigned ||
+                            delivery.status == DeliveryStatus.pickupArrived;
+      
+      // Start professional navigation
+      final success = await _navigationService.startNavigationToDelivery(
+        delivery: delivery,
+        currentLocation: _currentPosition!,
+        isPickupPhase: isPickupPhase,
+      );
+      
+      if (success) {
+        setState(() {
+          _isNavigating = true;
+        });
+        
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.navigation, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Text(isPickupPhase ? 'Navigation to pickup started' : 'Navigation to delivery started'),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+        
+        // 🔄 Send appropriate status via Ably when navigation starts
+        if (_driverFlow.hasActiveDelivery && _driverFlow.activeDelivery != null) {
+          final activeDelivery = _driverFlow.activeDelivery!;
+          final currentStage = activeDelivery.currentStage;
+          
+          // Send status update based on navigation phase
+          if (currentStage == DeliveryStage.headingToDelivery) {
+            debugPrint('📢 Sending in_transit status via Ably (SwiftDash Navigation)');
+            await AblyService().publishStatusUpdate(
+              deliveryId: activeDelivery.id,
+              status: 'in_transit',
+              driverLocation: {
+                'latitude': _currentPosition!.latitude,
+                'longitude': _currentPosition!.longitude,
+              },
+            );
+          }
+        }
+        
+        // Setup location tracking for navigation
+        _setupNavigationLocationTracking();
+        
+        // 🎥 Enable professional navigation camera mode
+        _enableNavigationCameraMode();
+        
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to start navigation. Please try external navigation.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error starting professional navigation: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Navigation error. Please try external navigation.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+  
+  /// Setup location tracking for navigation updates
+  void _setupNavigationLocationTracking() {
+    // Use a simple timer to periodically update navigation with current position
+    // This integrates with the existing location updates in the main map screen
+    Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (!_isNavigating) {
+        timer.cancel();
+        return;
+      }
+      
+      if (_currentPosition != null) {
+        _navigationService.updateLocation(_currentPosition!);
+        
+        // 🎥 Update camera to follow driver during navigation (only if locked)
+        if (_isNavigationCameraLocked) {
+          _updateNavigationCamera(_currentPosition!);
+        }
+      }
+    });
+    
+    // Listen to navigation events
+    _navigationService.eventStream.listen((event) {
+      if (event.type == NavigationEventType.arrivedAtDestination) {
+        setState(() {
+          _isNavigating = false;
+        });
+        
+        // 🎥 Exit navigation camera mode
+        _disableNavigationCameraMode();
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🎯 You have arrived at your destination!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    });
+  }
+  
+  /// Enable professional navigation camera mode (3D tilt, heading-up)
+  Future<void> _enableNavigationCameraMode() async {
+    if (_mapboxMap == null || _currentPosition == null) return;
+    
+    try {
+      debugPrint('🎥 Enabling navigation camera mode');
+      
+      // Set initial camera position with 3D tilt for navigation
+      await _mapboxMap!.flyTo(
+        CameraOptions(
+          center: Point(
+            coordinates: Position(
+              _currentPosition!.longitude,
+              _currentPosition!.latitude,
+            ),
+          ),
+          zoom: 17.0, // Closer zoom for navigation
+          bearing: _currentPosition!.heading, // Heading-up mode
+          pitch: 55.0, // 3D tilt for better road perspective
+        ),
+        MapAnimationOptions(duration: 1000, startDelay: 0),
+      );
+      
+      debugPrint('✅ Navigation camera mode enabled');
+    } catch (e) {
+      debugPrint('❌ Error enabling navigation camera: $e');
+    }
+  }
+  
+  /// Update camera to follow driver during navigation
+  Future<void> _updateNavigationCamera(geo.Position location) async {
+    if (_mapboxMap == null || !_isNavigating) return;
+    
+    try {
+      // Smoothly animate camera to follow driver with heading rotation
+      await _mapboxMap!.easeTo(
+        CameraOptions(
+          center: Point(
+            coordinates: Position(
+              location.longitude,
+              location.latitude,
+            ),
+          ),
+          zoom: 17.0, // Keep consistent navigation zoom
+          bearing: location.heading, // Rotate map to match driving direction
+          pitch: 55.0, // Maintain 3D perspective
+        ),
+        MapAnimationOptions(duration: 800, startDelay: 0),
+      );
+    } catch (e) {
+      debugPrint('❌ Error updating navigation camera: $e');
+    }
+  }
+  
+  /// Disable navigation camera mode and return to normal view
+  Future<void> _disableNavigationCameraMode() async {
+    if (_mapboxMap == null) return;
+    
+    try {
+      debugPrint('🎥 Disabling navigation camera mode');
+      
+      // Reset camera lock state
+      _isNavigationCameraLocked = true;
+      
+      // Return to normal top-down view
+      await _mapboxMap!.flyTo(
+        CameraOptions(
+          center: _currentPosition != null 
+              ? Point(
+                  coordinates: Position(
+                    _currentPosition!.longitude,
+                    _currentPosition!.latitude,
+                  ),
+                )
+              : null,
+          zoom: 15.0, // Standard zoom level
+          bearing: 0.0, // North-up
+          pitch: 0.0, // Flat view
+        ),
+        MapAnimationOptions(duration: 1000, startDelay: 0),
+      );
+      
+      debugPrint('✅ Navigation camera mode disabled');
+    } catch (e) {
+      debugPrint('❌ Error disabling navigation camera: $e');
+    }
+  }
+  
+  /// Re-center camera on driver position during navigation
+  Future<void> _recenterNavigationCamera() async {
+    if (_mapboxMap == null || _currentPosition == null || !_isNavigating) return;
+    
+    try {
+      debugPrint('🎯 Re-centering navigation camera');
+      
+      // Lock camera back to auto-follow
+      setState(() {
+        _isNavigationCameraLocked = true;
+      });
+      
+      // Animate back to navigation view
+      await _mapboxMap!.flyTo(
+        CameraOptions(
+          center: Point(
+            coordinates: Position(
+              _currentPosition!.longitude,
+              _currentPosition!.latitude,
+            ),
+          ),
+          zoom: 17.0,
+          bearing: _currentPosition!.heading,
+          pitch: 55.0,
+        ),
+        MapAnimationOptions(duration: 800, startDelay: 0),
+      );
+      
+      debugPrint('✅ Navigation camera re-centered');
+    } catch (e) {
+      debugPrint('❌ Error re-centering camera: $e');
+    }
+  }
+  
+  /// Detect when user manually moves camera during navigation
+  void _onCameraChange(CameraChangedEventData data) {
+    // Only unlock if we're in navigation and camera is currently locked
+    if (_isNavigating && _isNavigationCameraLocked) {
+      // User is manually controlling camera - unlock auto-follow
+      setState(() {
+        _isNavigationCameraLocked = false;
+      });
+      debugPrint('🔓 Camera unlocked - user is manually controlling view');
     }
   }
   

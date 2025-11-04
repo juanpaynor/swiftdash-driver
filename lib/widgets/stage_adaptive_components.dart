@@ -235,7 +235,7 @@ class StageAdaptiveHeader extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Earnings: \$${delivery.driverEarnings.toStringAsFixed(2)}',
+              'Earnings: ₱${delivery.driverEarnings.toStringAsFixed(2)}',
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 14,
@@ -524,10 +524,10 @@ class PriorityInfoCard extends StatelessWidget {
             _buildInfoRow('Total Distance', delivery.formattedDistance),
             _buildInfoRow('Duration', delivery.formattedDuration),
             const Divider(height: 24),
-            _buildEarningsRow('Total Amount', '\$${delivery.totalAmount?.toStringAsFixed(2) ?? delivery.totalPrice.toStringAsFixed(2)}'),
-            _buildEarningsRow('Your Earnings', '\$${delivery.driverEarnings.toStringAsFixed(2)}', isEarnings: true),
+            _buildEarningsRow('Total Amount', '₱${delivery.totalAmount?.toStringAsFixed(2) ?? delivery.totalPrice.toStringAsFixed(2)}'),
+            _buildEarningsRow('Your Earnings', '₱${delivery.driverEarnings.toStringAsFixed(2)}', isEarnings: true),
             if (delivery.tipAmount != null && delivery.tipAmount! > 0)
-              _buildEarningsRow('Tip', '+\$${delivery.tipAmount!.toStringAsFixed(2)}', isBonus: true),
+              _buildEarningsRow('Tip', '+₱${delivery.tipAmount!.toStringAsFixed(2)}', isBonus: true),
           ],
         );
     }

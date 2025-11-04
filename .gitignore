@@ -48,3 +48,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# AI-generated documentation files
+VOICE_NAVIGATION_IMPLEMENTATION.md
+VOICE_NAVIGATION_QUICK_START.md
+NAVIGATION_CAMERA_IMPLEMENTATION.md
+PHASE_2_VOICE_NAVIGATION_PLAN.md

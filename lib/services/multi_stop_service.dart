@@ -3,9 +3,11 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/delivery_stop.dart';
 import '../core/mapbox_config.dart';
+import 'ably_service.dart';
 
 class MultiStopService {
   final SupabaseClient _supabase = Supabase.instance.client;
+  final AblyService _ablyService = AblyService();
 
   /// Optimize route for multiple stops using Mapbox Optimization API
   /// Returns optimized stop order and route geometry
@@ -255,6 +257,13 @@ class MultiStopService {
     String? completionNotes,
   }) async {
     try {
+      // Get stop details BEFORE update
+      final stopBefore = await _supabase
+          .from('delivery_stops')
+          .select()
+          .eq('id', stopId)
+          .single();
+      
       final updateData = <String, dynamic>{
         'status': status,
         'updated_at': DateTime.now().toIso8601String(),
@@ -266,12 +275,24 @@ class MultiStopService {
       if (signatureUrl != null) updateData['signature_url'] = signatureUrl;
       if (completionNotes != null) updateData['completion_notes'] = completionNotes;
       
+      // Update database
       final response = await _supabase
           .from('delivery_stops')
           .update(updateData)
           .eq('id', stopId)
           .select()
           .single();
+      
+      // Publish to Ably for customer app
+      await _ablyService.publishStopUpdate(
+        deliveryId: stopBefore['delivery_id'],
+        stopId: stopId,
+        stopNumber: stopBefore['stop_number'],
+        stopType: stopBefore['stop_type'],
+        status: status,
+        proofPhotoUrl: proofPhotoUrl,
+        completionNotes: completionNotes,
+      );
       
       return DeliveryStop.fromJson(response);
     } catch (e) {

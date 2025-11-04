@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'navigation_service.dart'; // Import new navigation service
 
 class MapboxService {
   // Load token from environment (secure)
@@ -13,13 +14,37 @@ class MapboxService {
   static const String manilaProximity = '121.0244,14.5995';
 
   /// Get route data between two points
+  /// 🔄 ENHANCED: Now supports both basic routing and professional navigation
   static Future<RouteData?> getRoute(
     double fromLat, 
     double fromLng, 
     double toLat, 
-    double toLng
-  ) async {
+    double toLng, {
+    bool useNavigation = false, // NEW: Enable professional navigation
+  }) async {
     try {
+      // If professional navigation requested, use NavigationService
+      if (useNavigation) {
+        final navRoute = await NavigationService.instance.calculateNavigationRoute(
+          startLat: fromLat,
+          startLng: fromLng,
+          endLat: toLat,
+          endLng: toLng,
+        );
+        
+        if (navRoute != null) {
+          // Convert NavigationRoute to RouteData for compatibility
+          return RouteData(
+            distance: navRoute.totalDistance / 1000, // Convert to km
+            duration: navRoute.totalDuration.toInt(), // Already in minutes
+            geometry: navRoute.geometry,
+            bbox: _calculateBbox(navRoute.geometry),
+            navigationRoute: navRoute, // NEW: Include full navigation data
+          );
+        }
+      }
+      
+      // Fallback to basic Mapbox routing (existing functionality)
       final url = 'https://api.mapbox.com/directions/v5/mapbox/driving'
           '/$fromLng,$fromLat;$toLng,$toLat'
           '?access_token=$accessToken'
@@ -168,6 +193,34 @@ class MapboxService {
       return '${hours}h ${minutes}min';
     }
   }
+
+  /// Calculate bounding box from geometry
+  static List<double> _calculateBbox(Map<String, dynamic> geometry) {
+    try {
+      final coordinates = geometry['coordinates'] as List;
+      if (coordinates.isEmpty) return [];
+      
+      double minLng = double.infinity;
+      double maxLng = double.negativeInfinity;
+      double minLat = double.infinity;
+      double maxLat = double.negativeInfinity;
+      
+      for (final coord in coordinates) {
+        final lng = (coord[0] as num).toDouble();
+        final lat = (coord[1] as num).toDouble();
+        
+        minLng = minLng < lng ? minLng : lng;
+        maxLng = maxLng > lng ? maxLng : lng;
+        minLat = minLat < lat ? minLat : lat;
+        maxLat = maxLat > lat ? maxLat : lat;
+      }
+      
+      return [minLng, minLat, maxLng, maxLat];
+    } catch (e) {
+      print('Error calculating bbox: $e');
+      return [];
+    }
+  }
 }
 
 class RouteData {
@@ -175,16 +228,26 @@ class RouteData {
   final int duration; // in minutes
   final Map<String, dynamic> geometry; // GeoJSON geometry
   final List<dynamic> bbox; // Bounding box for the route
+  final NavigationRoute? navigationRoute; // NEW: Professional navigation data
 
   RouteData({
     required this.distance,
     required this.duration,
     required this.geometry,
     required this.bbox,
+    this.navigationRoute, // NEW: Optional navigation route
   });
+
+  /// Check if this route has professional navigation capabilities
+  bool get hasNavigation => navigationRoute != null;
+
+  /// Get turn-by-turn instructions (empty if basic route)
+  List<NavigationInstruction> get instructions => 
+      navigationRoute?.instructions ?? [];
 
   @override
   String toString() {
-    return 'RouteData(distance: ${distance}km, duration: ${duration}min)';
+    final navStatus = hasNavigation ? ' (with navigation)' : ' (basic)';
+    return 'RouteData(distance: ${distance}km, duration: ${duration}min$navStatus)';
   }
 }

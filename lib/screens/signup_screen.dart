@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../core/supabase_config.dart';
-import '../core/app_assets.dart';
 import '../services/auth_service.dart';
 import '../services/vehicle_type_service.dart';
 import '../services/otp_service.dart';

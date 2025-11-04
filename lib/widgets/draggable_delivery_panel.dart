@@ -7,6 +7,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:math' as math;
 import '../models/delivery.dart';
 import '../models/delivery_stop.dart';
+import '../models/cash_remittance.dart';
 import '../core/supabase_config.dart';
 import '../services/delivery_stage_manager.dart';
 import '../services/mapbox_service.dart';
@@ -15,6 +16,7 @@ import '../services/multi_stop_service.dart';
 import '../services/ably_service.dart';
 import '../services/realtime_service.dart';
 import '../services/chat_service.dart';
+import '../services/driver_earnings_service.dart';
 import '../widgets/pickup_confirmation_dialog.dart';
 import '../widgets/proof_of_delivery_dialog.dart';
 import '../widgets/multi_stop_widgets.dart';
@@ -1573,23 +1575,23 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
         return;
       }
       
-      // Update status to packageCollected in database
-      final response = await supabase.from('deliveries').update({
-        'status': DeliveryStatus.packageCollected.databaseValue,
-        'pickup_proof_photo_url': photoUrl,
-        // Note: picked_up_at column doesn't exist in schema - removed
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', widget.delivery.id).select();
-      
-      print('✅ Package collected status updated: $response');
-      
-      // ✅ Send real-time status update via Ably (non-blocking)
-      AblyService().publishStatusUpdate(
+      // 🚀 ABLY-FIRST: Send status update via Ably ONLY (no database for intermediate status)
+      // Database is ONLY updated for final statuses (delivered, cancelled, failed)
+      await AblyService().publishStatusUpdate(
         deliveryId: widget.delivery.id,
         status: DeliveryStatus.packageCollected.databaseValue,
         notes: 'Driver has collected the package',
-      ).catchError((e) => debugPrint('⚠️ Ably publish failed: $e'));
-      debugPrint('📢 Sent package_collected status via Ably (non-blocking)');
+      );
+      print('✅ Sent package_collected status via Ably (intermediate status - no DB update)');
+      
+      // Store pickup proof photo URL if available (separate from status)
+      if (photoUrl.isNotEmpty) {
+        await supabase.from('deliveries').update({
+          'pickup_proof_photo_url': photoUrl,
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', widget.delivery.id);
+        print('� Stored pickup proof photo URL');
+      }
       
       // Notify parent to refresh delivery state
       if (widget.onStatusChange != null) {
@@ -1652,26 +1654,16 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
         return;
       }
       
-      // Update status in database
-      // NOTE: The deliveries table does not have explicit arrival timestamp
-      // columns in the current schema. Writing to unknown columns causes
-      // PostgREST errors (PGRST204). Set status and updated_at only.
-      final response = await supabase.from('deliveries').update({
-        'status': nextStatus.databaseValue,  // ✅ Use snake_case for customer app
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', widget.delivery.id).select();
-      
-      print('✅ Database update response: $response');
-      
-      // ✅ Send real-time status update via Ably (non-blocking)
-      AblyService().publishStatusUpdate(
+      // 🚀 ABLY-FIRST: Send status update via Ably ONLY (no database for intermediate status)
+      // Arrival statuses (at_pickup, at_destination) are intermediate - NOT stored in database
+      await AblyService().publishStatusUpdate(
         deliveryId: widget.delivery.id,
         status: nextStatus.databaseValue,
         notes: stage == DeliveryStage.headingToPickup 
           ? 'Driver has arrived at pickup location' 
           : 'Driver has arrived at delivery location',
-      ).catchError((e) => debugPrint('⚠️ Ably publish failed: $e'));
-      debugPrint('📢 Sent ${nextStatus.databaseValue} status via Ably (non-blocking)');
+      );
+      print('✅ Sent ${nextStatus.databaseValue} status via Ably (intermediate status - no DB update)');
       
       // ✅ FIX: Notify parent to refresh delivery state immediately
       // The parent will reload the delivery from database and rebuild the panel
@@ -1780,6 +1772,8 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
   }
   
   /// Show cancel job confirmation dialog
+  /// TODO: Hook this up to a cancel button when needed
+  // ignore: unused_element
   Future<void> _showCancelJobDialog() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1946,14 +1940,41 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
         return;
       }
       
-      // Update delivery status to delivered
-      // Note: POD fields (proof_photo_url, signature_data, recipient_name, delivery_notes) 
-      // don't exist in current schema - removed to prevent PGRST204 errors
-      await supabase.from('deliveries').update({
-        'status': DeliveryStatus.delivered.databaseValue,
-        'completed_at': DateTime.now().toIso8601String(),
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', widget.delivery.id);
+      // 💰 Record earnings for this delivery
+      try {
+        final earningsService = DriverEarningsService();
+        PaymentMethod paymentMethod;
+        try {
+          paymentMethod = PaymentMethod.values.firstWhere(
+            (e) => e.toString().split('.').last == widget.delivery.paymentMethod,
+            orElse: () => PaymentMethod.cash,
+          );
+        } catch (e) {
+          paymentMethod = PaymentMethod.cash;
+        }
+        
+        await earningsService.recordDeliveryEarnings(
+          driverId: widget.delivery.driverId!,
+          deliveryId: widget.delivery.id,
+          totalPrice: widget.delivery.totalPrice,
+          paymentMethod: paymentMethod,
+          tips: widget.delivery.tipAmount ?? 0.0,
+        );
+        print('💰 Earnings recorded: ₱${widget.delivery.totalPrice.toStringAsFixed(2)}');
+      } catch (e) {
+        print('⚠️ Failed to record earnings: $e');
+        // Don't block delivery completion if earnings recording fails
+      }
+      
+      // ⭐ Use fleet-safe helper function (Added Nov 3, 2025)
+      // This handles: delivery completion, driver status reset, and fleet vehicle reset
+      await supabase.rpc(
+        'complete_delivery_safe',
+        params: {
+          'p_delivery_id': widget.delivery.id,
+          'p_driver_id': widget.delivery.driverId!,
+        },
+      );
       
       print('✅ Delivery marked as complete');
       
@@ -1998,6 +2019,8 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
   }
   
   /// Show report issue dialog
+  /// TODO: Hook this up to a report issue button when needed
+  // ignore: unused_element
   Future<void> _showReportIssueDialog() async {
     String? selectedIssue;
     final TextEditingController notesController = TextEditingController();

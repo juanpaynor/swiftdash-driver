@@ -196,7 +196,7 @@ class _OfferModalState extends State<OfferModal>
                               Expanded(
                                 child: _buildInfoCard(
                                   'Payment',
-                                  '\$${widget.delivery.totalPrice.toStringAsFixed(2)}',
+                                  '₱${widget.delivery.totalPrice.toStringAsFixed(2)}',
                                   Icons.attach_money,
                                   Colors.green,
                                 ),

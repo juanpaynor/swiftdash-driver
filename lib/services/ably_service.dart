@@ -145,6 +145,46 @@ class AblyService {
     }
   }
 
+  /// Publish stop update event to Ably for multi-stop deliveries
+  /// Used to notify customer app when driver arrives/completes each stop
+  Future<void> publishStopUpdate({
+    required String deliveryId,
+    required String stopId,
+    required int stopNumber,
+    required String stopType, // 'pickup' or 'dropoff'
+    required String status,   // 'pending', 'in_progress', 'completed', 'failed'
+    Map<String, dynamic>? driverLocation,
+    String? proofPhotoUrl,
+    String? completionNotes,
+  }) async {
+    try {
+      final channelName = 'tracking:$deliveryId';
+      final channel = getChannel(channelName);
+      
+      final payload = {
+        'delivery_id': deliveryId,
+        'stop_id': stopId,
+        'stop_number': stopNumber,
+        'stop_type': stopType,
+        'status': status,
+        'timestamp': DateTime.now().toIso8601String(),
+        if (driverLocation != null) 'driver_location': driverLocation,
+        if (proofPhotoUrl != null) 'proof_photo_url': proofPhotoUrl,
+        if (completionNotes != null) 'completion_notes': completionNotes,
+      };
+      
+      await channel.publish(
+        name: 'stop-update',  // Match customer app event name
+        data: payload,
+      );
+      
+      debugPrint('📦 Published stop-update to $channelName: Stop #$stopNumber ($stopType) - $status');
+    } catch (e) {
+      debugPrint('❌ Failed to publish stop update: $e');
+      // Don't rethrow - stop updates are non-critical for database operations
+    }
+  }
+
   Future<void> enterPresence(String deliveryId) async {
     try {
       final channelName = 'tracking:$deliveryId';

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../services/driver_flow_service.dart';
 import '../core/supabase_config.dart';
+import '../services/driver_earnings_service.dart';
+import '../screens/driver_earnings_screen.dart';
 
 class EarningsModal extends StatefulWidget {
   final DriverFlowService driverFlowService;
@@ -18,6 +20,9 @@ class _EarningsModalState extends State<EarningsModal>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _slideAnimation;
+  final DriverEarningsService _earningsService = DriverEarningsService();
+  EarningsSummary? _summary;
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -34,6 +39,25 @@ class _EarningsModalState extends State<EarningsModal>
       curve: Curves.easeOut,
     ));
     _animationController.forward();
+    _loadEarnings();
+  }
+
+  Future<void> _loadEarnings() async {
+    final driver = widget.driverFlowService.currentDriver;
+    if (driver != null) {
+      try {
+        final summary = await _earningsService.getEarningsSummary(driver.id);
+        setState(() {
+          _summary = summary;
+          _isLoading = false;
+        });
+      } catch (e) {
+        print('Error loading earnings: $e');
+        setState(() => _isLoading = false);
+      }
+    } else {
+      setState(() => _isLoading = false);
+    }
   }
 
   @override
@@ -96,63 +120,89 @@ class _EarningsModalState extends State<EarningsModal>
                 
                 // Content
                 Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: FutureBuilder<void>(
-                      future: widget.driverFlowService.initialize(),
-                      builder: (context, snapshot) {
-                        final driver = widget.driverFlowService.currentDriver;
-                        
-                        if (driver == null) {
-                          return const Center(
-                            child: CircularProgressIndicator(),
-                          );
-                        }
-                        
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Today's earnings card
-                            _buildEarningsCard(
-                              'Today\'s Earnings',
-                              '₱${(driver.rating * 15.5).toStringAsFixed(2)}', // Mock today's earnings
-                              '${driver.totalDeliveries > 10 ? 5 : driver.totalDeliveries % 3} deliveries completed',
-                              SwiftDashColors.lightBlue,
-                              Icons.today,
-                            ),
-                            
-                            const SizedBox(height: 16),
-                            
-                            // This week's earnings
-                            _buildEarningsCard(
-                              'This Week',
-                              '₱${(driver.rating * 85.75).toStringAsFixed(2)}', // Mock week earnings
-                              '${driver.totalDeliveries > 20 ? 23 : driver.totalDeliveries + 8} total deliveries',
-                              Colors.green,
-                              Icons.calendar_view_week,
-                            ),
-                            
-                            const SizedBox(height: 16),
-                            
-                            // Total earnings
-                            _buildEarningsCard(
-                              'Total Earnings',
-                              '₱${(driver.totalDeliveries * 12.5 + driver.rating * 45).toStringAsFixed(2)}',
-                              '${driver.totalDeliveries} lifetime deliveries',
-                              SwiftDashColors.darkBlue,
-                              Icons.account_balance_wallet,
-                            ),
-                            
-                            const SizedBox(height: 24),
-                            
-                            // Performance metrics
-                            const Text(
-                              'Performance',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: SwiftDashColors.darkBlue,
-                              ),
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Builder(
+                            builder: (context) {
+                              final driver = widget.driverFlowService.currentDriver;
+                              
+                              if (driver == null || _summary == null) {
+                                return const Center(
+                                  child: Text('No earnings data available'),
+                                );
+                              }
+                              
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Today's earnings card
+                                  _buildEarningsCard(
+                                    'Today\'s Earnings',
+                                    '₱${_summary!.todayEarnings.toStringAsFixed(2)}',
+                                    '${_summary!.todayDeliveries} ${_summary!.todayDeliveries == 1 ? 'delivery' : 'deliveries'} completed',
+                                    SwiftDashColors.lightBlue,
+                                    Icons.today,
+                                  ),
+                                  
+                                  const SizedBox(height: 16),
+                                  
+                                  // This week's earnings
+                                  _buildEarningsCard(
+                                    'This Week',
+                                    '₱${_summary!.weekEarnings.toStringAsFixed(2)}',
+                                    '${_summary!.weekDeliveries} total deliveries',
+                                    Colors.green,
+                                    Icons.calendar_view_week,
+                                  ),
+                                  
+                                  const SizedBox(height: 16),
+                                  
+                                  // This month's earnings
+                                  _buildEarningsCard(
+                                    'This Month',
+                                    '₱${_summary!.monthEarnings.toStringAsFixed(2)}',
+                                    '${_summary!.monthDeliveries} deliveries • Avg: ₱${_summary!.averageEarningsPerDelivery.toStringAsFixed(0)}',
+                                    SwiftDashColors.darkBlue,
+                                    Icons.calendar_month,
+                                  ),
+                                  
+                                  const SizedBox(height: 24),
+                                  
+                                  // View Details Button
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      onPressed: () {
+                                        Navigator.of(context).pop();
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (context) => DriverEarningsScreen(driver: driver),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(Icons.insights),
+                                      label: const Text('View Detailed Earnings'),
+                                      style: ElevatedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(vertical: 16),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  
+                                  const SizedBox(height: 24),
+                                  
+                                  // Performance metrics
+                                  const Text(
+                                    'Performance',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: SwiftDashColors.darkBlue,
+                                    ),
                             ),
                             const SizedBox(height: 12),
                             

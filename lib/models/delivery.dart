@@ -66,7 +66,13 @@ class Delivery {
   final double? tipAmount;
   final double? totalAmount;
   
-  const Delivery({
+  // ⭐ Fleet Management Fields (Added Nov 3, 2025)
+  final String? businessId;        // Which business created this delivery
+  final String? fleetVehicleId;    // Which fleet vehicle (if assigned)
+  final String? driverSource;      // 'private_fleet', 'public_fleet', 'independent_driver'
+  final String? assignmentType;    // 'auto' or 'manual'
+  
+  Delivery({
     required this.id,
     required this.customerId,
     this.driverId,
@@ -112,6 +118,10 @@ class Delivery {
     this.deliveryFee,
     this.tipAmount,
     this.totalAmount,
+    this.businessId,
+    this.fleetVehicleId,
+    this.driverSource,
+    this.assignmentType,
   });
   
   // Calculate driver earnings (you can adjust this percentage)
@@ -264,6 +274,10 @@ class Delivery {
       deliveryFee: json['delivery_fee']?.toDouble() ?? 0.0,
       tipAmount: json['tip_amount']?.toDouble() ?? 0.0,
       totalAmount: json['total_amount']?.toDouble() ?? 0.0,
+      businessId: json['business_id'],
+      fleetVehicleId: json['fleet_vehicle_id'],
+      driverSource: json['driver_source'],
+      assignmentType: json['assignment_type'],
     );
     } catch (e, stackTrace) {
       print('❌ Error parsing Delivery JSON: $e');
@@ -319,6 +333,10 @@ class Delivery {
       'delivery_fee': deliveryFee,
       'tip_amount': tipAmount,
       'total_amount': totalAmount,
+      'business_id': businessId,
+      'fleet_vehicle_id': fleetVehicleId,
+      'driver_source': driverSource,
+      'assignment_type': assignmentType,
     };
   }
   

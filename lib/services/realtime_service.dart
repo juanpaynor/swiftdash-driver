@@ -465,14 +465,16 @@ class OptimizedRealtimeService {
         print('⏭️ Intermediate status - skipping database update (Ably-only): $status');
       }
       
-      // 📍 Store location for critical events (all statuses)
-      if (latitude != null && longitude != null) {
+      // 📍 Store location ONLY for final statuses (avoid unnecessary DB writes)
+      // Intermediate status locations are already broadcasted via Ably real-time
+      if (isFinalStatus && latitude != null && longitude != null) {
         await storeLocationForCriticalEvent(
           eventType: status,
           deliveryId: deliveryId,
           latitude: latitude,
           longitude: longitude,
         );
+        print('💾 Stored final location for: $status');
       }
       
       print('✅ Successfully processed delivery status update: $status');
@@ -704,19 +706,15 @@ class OptimizedRealtimeService {
       print('🚨 Delivery ID: $deliveryId');
       print('🚨 Driver ID: $driverId');
       
-      // Update delivery status from 'driver_offered' to 'driver_assigned'
-      final result = await _supabase
-          .from('deliveries')
-          .update({
-            'status': 'driver_assigned',
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', deliveryId)
-          .eq('driver_id', driverId)
-          .eq('status', 'driver_offered') // Only update if still offered
-          .select()
-          .maybeSingle()
-          .timeout(
+      // ⭐ Use fleet-safe helper function (Added Nov 3, 2025)
+      // This handles: delivery status update, driver availability, and current_status
+      final result = await _supabase.rpc(
+        'accept_delivery_safe',
+        params: {
+          'p_delivery_id': deliveryId,
+          'p_driver_id': driverId,
+        },
+      ).timeout(
             const Duration(seconds: 10),
             onTimeout: () {
               print('❌ Accept delivery timeout after 10 seconds');
@@ -724,22 +722,9 @@ class OptimizedRealtimeService {
             },
           );
       
-      if (result != null) {
+      if (result != null && result['success'] == true) {
         print('🚨 ✅ DELIVERY OFFER ACCEPTED SUCCESSFULLY');
-        
-        // Update driver availability to false (busy with delivery)
-        await _supabase
-            .from('driver_profiles')
-            .update({'is_available': false})
-            .eq('id', driverId)
-            .timeout(
-              const Duration(seconds: 5),
-              onTimeout: () {
-                print('⚠️ Driver availability update timeout (non-critical)');
-                return null;
-              },
-            );
-        print('📱 Updated driver availability to false (busy with delivery)');
+        print('📱 Driver status updated to busy');
         
         // Cancel any current offer modal
         _cancelCurrentOffer();

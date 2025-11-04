@@ -23,7 +23,13 @@ class Driver {
   final DateTime createdAt;
   final DateTime updatedAt;
   
-  const Driver({
+  // ⭐ Fleet Management Fields (Added Nov 3, 2025)
+  final String employmentType;        // 'independent' or 'fleet_driver'
+  final String? managedByBusinessId;  // UUID of business (if fleet driver)
+  final String? businessName;         // For display in UI
+  final String currentStatus;         // 'online', 'offline', 'busy'
+  
+  Driver({
     required this.id,
     required this.email,
     required this.firstName,
@@ -45,9 +51,16 @@ class Driver {
     required this.totalDeliveries,
     required this.createdAt,
     required this.updatedAt,
+    this.employmentType = 'independent',
+    this.managedByBusinessId,
+    this.businessName,
+    this.currentStatus = 'offline',
   });
   
   String get fullName => '$firstName $lastName';
+  
+  // ⭐ Fleet Management Helper
+  bool get isFleetDriver => employmentType == 'fleet_driver';
   
   factory Driver.fromJson(Map<String, dynamic> json) {
     return Driver(
@@ -75,6 +88,10 @@ class Driver {
       totalDeliveries: json['total_deliveries'] ?? 0,
       createdAt: DateTime.parse(json['created_at']),
       updatedAt: DateTime.parse(json['updated_at']),
+      employmentType: json['employment_type'] ?? 'independent',
+      managedByBusinessId: json['managed_by_business_id'],
+      businessName: json['business_name'],
+      currentStatus: json['current_status'] ?? 'offline',
     );
   }
   
@@ -101,6 +118,10 @@ class Driver {
       'total_deliveries': totalDeliveries,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
+      'employment_type': employmentType,
+      'managed_by_business_id': managedByBusinessId,
+      'business_name': businessName,
+      'current_status': currentStatus,
     };
   }
 }
