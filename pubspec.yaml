@@ -64,6 +64,9 @@ dependencies:
   # Phase 3: Delight animations
   confetti: ^0.7.0
   animated_text_kit: ^4.2.2
+  
+  # Sound effects for notifications
+  audioplayers: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -94,6 +97,7 @@ flutter:
     - assets/images/
     - assets/images/logos/
     - assets/images/icons/
+    - assets/sound/
     - .env
 
   # An image asset can refer to one or more resolution-specific "variants", see

@@ -29,6 +29,7 @@ import '../services/navigation_manager.dart';
 import '../services/optimized_state_manager.dart';
 import '../widgets/optimized_state_widgets.dart';
 import '../services/delivery_stage_manager.dart';
+import '../services/notification_sound_service.dart';
 import 'delivery_completion_screen.dart';
 
 class MainMapScreen extends StatefulWidget {
@@ -59,17 +60,24 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   CircleAnnotationManager? _driverLocationManager;
   PointAnnotationManager? _pointAnnotationManager;
   PolylineAnnotationManager? _routePolylineManager;
-  CircleAnnotationManager? _pickupMarkerManager;
-  CircleAnnotationManager? _dropoffMarkerManager;
+  PointAnnotationManager? _pickupMarkerManager; // 🔄 Changed from Circle to Point
+  PointAnnotationManager? _dropoffMarkerManager; // 🔄 Changed from Circle to Point
   PointAnnotationManager? _multiStopNumberedMarkers; // 🚦 For numbered multi-stop markers
   
   // 🧭 NEW: Professional navigation service
   final NavigationService _navigationService = NavigationService.instance;
+  final NotificationSoundService _soundService = NotificationSoundService();
   bool _isNavigating = false;
   bool _isNavigationCameraLocked = true; // Camera auto-follow toggle during navigation
   
+  // 🗺️ Map style URLs
+  static const String _defaultMapStyle = MapboxConfig.streetStyle; // Default style (idle)
+  static const String _navigationMapStyle = 'mapbox://styles/swiftdash/cmgtdgxbe000e01st0atdhrex'; // Navigation style
+  
   // Route data for active delivery (old mapbox service)
   mapbox_svc.RouteData? _routeData;
+  List<Position>? _originalRouteCoordinates; // 🆕 Store original route for trimming
+  PolylineAnnotation? _currentRouteAnnotation; // 🆕 Store current polyline annotation
   
   // Route preview for incoming offers - simplified tracking
   Delivery? _currentOffer;
@@ -101,6 +109,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     _initializeAnimations();
     _initializeApp();
     _listenForDeliveryCancellation();
+    
+    // Initialize notification sound service
+    _soundService.initialize();
   }
   
   @override
@@ -222,6 +233,10 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
           
           if (mounted && driverState.isOnline) {
             print('🔔 ✅ CONDITIONS MET - SHOWING OFFER MODAL');
+            
+            // 🔔 Play notification sound
+            _soundService.playOfferSound();
+            
             _showAutomaticOfferModal(delivery);
           } else {
             print('🔔 ❌ CONDITIONS NOT MET - IGNORING OFFER');
@@ -331,6 +346,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     // 🔧 PERFORMANCE FIX: Cancel stream subscriptions FIRST
     _offerStreamSubscription?.cancel();
     _offerStreamSubscription = null;
+    
+    // Dispose sound service
+    _soundService.dispose();
     
     // Dispose animation controllers
     _onlineToggleController.dispose();
@@ -645,6 +663,8 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
                 });
                 // 🎥 Exit navigation camera mode when user closes
                 await _disableNavigationCameraMode();
+                // 🗺️ Switch back to default map style
+                await _switchToDefaultMapStyle();
               },
               showCompactMode: _driverFlow.hasActiveDelivery, // Compact when delivery panel is shown
             ),
@@ -1454,6 +1474,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         // 🎥 Enable professional navigation camera mode
         _enableNavigationCameraMode();
         
+        // 🗺️ Switch to premium navigation map style
+        _switchToNavigationMapStyle();
+        
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1490,6 +1513,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         if (_isNavigationCameraLocked) {
           _updateNavigationCamera(_currentPosition!);
         }
+        
+        // 🆕 Update route polyline to show progress (shrinking effect)
+        _updateRoutePolyline(_currentPosition!);
       }
     });
     
@@ -1502,6 +1528,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         
         // 🎥 Exit navigation camera mode
         _disableNavigationCameraMode();
+        
+        // 🗺️ Switch back to default map style
+        _switchToDefaultMapStyle();
         
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1598,6 +1627,74 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       debugPrint('✅ Navigation camera mode disabled');
     } catch (e) {
       debugPrint('❌ Error disabling navigation camera: $e');
+    }
+  }
+  
+  /// 🗺️ Switch to navigation map style (custom premium style)
+  Future<void> _switchToNavigationMapStyle() async {
+    if (_mapboxMap == null) return;
+    
+    try {
+      debugPrint('🗺️ Switching to navigation map style: $_navigationMapStyle');
+      await _mapboxMap!.loadStyleURI(_navigationMapStyle);
+      
+      // Re-enable location puck after style change
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Re-create navigation arrow puck
+      final navigationArrowImage = await _createNavigationArrowImage();
+      await _mapboxMap!.location.updateSettings(LocationComponentSettings(
+        enabled: true,
+        puckBearingEnabled: true,
+        pulsingEnabled: true,
+        pulsingColor: const Color(0xFFFF6B35).value,
+        pulsingMaxRadius: 30.0,
+        locationPuck: LocationPuck(
+          locationPuck2D: LocationPuck2D(
+            topImage: navigationArrowImage,
+            bearingImage: navigationArrowImage,
+            shadowImage: null,
+          ),
+        ),
+      ));
+      
+      debugPrint('✅ Navigation map style loaded');
+    } catch (e) {
+      debugPrint('❌ Error loading navigation map style: $e');
+    }
+  }
+  
+  /// 🗺️ Switch back to default map style
+  Future<void> _switchToDefaultMapStyle() async {
+    if (_mapboxMap == null) return;
+    
+    try {
+      debugPrint('🗺️ Switching to default map style: $_defaultMapStyle');
+      await _mapboxMap!.loadStyleURI(_defaultMapStyle);
+      
+      // Re-enable location puck after style change
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Re-create navigation arrow puck
+      final navigationArrowImage = await _createNavigationArrowImage();
+      await _mapboxMap!.location.updateSettings(LocationComponentSettings(
+        enabled: true,
+        puckBearingEnabled: true,
+        pulsingEnabled: true,
+        pulsingColor: const Color(0xFFFF6B35).value,
+        pulsingMaxRadius: 30.0,
+        locationPuck: LocationPuck(
+          locationPuck2D: LocationPuck2D(
+            topImage: navigationArrowImage,
+            bearingImage: navigationArrowImage,
+            shadowImage: null,
+          ),
+        ),
+      ));
+      
+      debugPrint('✅ Default map style loaded');
+    } catch (e) {
+      debugPrint('❌ Error loading default map style: $e');
     }
   }
   
@@ -2184,36 +2281,38 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         
         print('✅ ${delivery.stops!.length} numbered stop markers added');
       } else {
-        // SINGLE-STOP: Add pickup and delivery pins (original behavior)
+        // SINGLE-STOP: Add pickup and delivery pins with Maki icons
         print('🗺️ Adding pickup and delivery pins');
         
-        // Create annotation managers
-        _pickupMarkerManager = await _mapboxMap!.annotations.createCircleAnnotationManager();
-        _dropoffMarkerManager = await _mapboxMap!.annotations.createCircleAnnotationManager();
+        // Create Point annotation managers
+        _pickupMarkerManager = await _mapboxMap!.annotations.createPointAnnotationManager();
+        _dropoffMarkerManager = await _mapboxMap!.annotations.createPointAnnotationManager();
         
-        // Pickup pin (green)
+        // 📍 Pickup marker (green circle - Maki icon)
         final pickupPosition = Point(
           coordinates: Position(delivery.pickupLongitude, delivery.pickupLatitude)
         );
-        final pickupOptions = CircleAnnotationOptions(
+        final pickupOptions = PointAnnotationOptions(
           geometry: pickupPosition,
-          circleRadius: 12.0,
-          circleColor: Colors.green.value,
-          circleStrokeColor: Colors.white.value,
-          circleStrokeWidth: 3.0,
+          iconImage: 'circle-15', // Maki icon: green circle
+          iconSize: 1.5,
+          iconColor: 0xFF22C55E, // Green color (ARGB)
+          iconHaloColor: 0xFFFFFFFF, // White halo/border (ARGB)
+          iconHaloWidth: 2.0,
         );
         await _pickupMarkerManager!.create(pickupOptions);
         
-        // Delivery pin (red)
+        // 🎯 Delivery marker (red location pin - Maki icon)
         final deliveryPosition = Point(
           coordinates: Position(delivery.deliveryLongitude, delivery.deliveryLatitude)
         );
-        final deliveryOptions = CircleAnnotationOptions(
+        final deliveryOptions = PointAnnotationOptions(
           geometry: deliveryPosition,
-          circleRadius: 12.0,
-          circleColor: Colors.red.value,
-          circleStrokeColor: Colors.white.value,
-          circleStrokeWidth: 3.0,
+          iconImage: 'marker-15', // Maki icon: classic map pin
+          iconSize: 2.0, // Larger for destination
+          iconColor: 0xFFEF4444, // Red color (ARGB)
+          iconHaloColor: 0xFFFFFFFF, // White halo/border (ARGB)
+          iconHaloWidth: 2.0,
         );
         await _dropoffMarkerManager!.create(deliveryOptions);
       }
@@ -2647,20 +2746,86 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       
       _routePolylineManager = await _mapboxMap!.annotations.createPolylineAnnotationManager();
       
+      // 🆕 Store original route coordinates for trimming later
+      final lineString = LineString.fromJson(routeData.geometry);
+      _originalRouteCoordinates = lineString.coordinates.toList();
+      
       // Create polyline from route geometry
       final polylineOptions = PolylineAnnotationOptions(
-        geometry: LineString.fromJson(routeData.geometry),
+        geometry: lineString,
         lineColor: SwiftDashColors.lightBlue.value,
         lineWidth: 5.0,
         lineOpacity: 0.8,
       );
       
-      await _routePolylineManager!.create(polylineOptions);
+      _currentRouteAnnotation = await _routePolylineManager!.create(polylineOptions);
       
-      print('✅ Route polyline drawn on map');
+      print('✅ Route polyline drawn on map (${_originalRouteCoordinates?.length} points)');
     } catch (e) {
       print('❌ Error drawing route: $e');
     }
+  }
+  
+  /// 🆕 Update route polyline to remove traveled segments (shrinking effect)
+  Future<void> _updateRoutePolyline(geo.Position driverLocation) async {
+    if (_routePolylineManager == null || 
+        _currentRouteAnnotation == null || 
+        _originalRouteCoordinates == null ||
+        _originalRouteCoordinates!.isEmpty) {
+      return;
+    }
+    
+    try {
+      // Find the closest point on the route to the driver's current location
+      int closestIndex = _findClosestPointIndex(
+        driverLocation.latitude,
+        driverLocation.longitude,
+        _originalRouteCoordinates!,
+      );
+      
+      // If we're past the first few points, trim the route
+      if (closestIndex > 2) { // Keep at least 2 points behind for smooth visuals (reduced from 5)
+        // Get remaining coordinates (from closest point to end)
+        final remainingCoordinates = _originalRouteCoordinates!.sublist(closestIndex);
+        
+        // Update the polyline with trimmed route
+        if (remainingCoordinates.length > 1) {
+          await _routePolylineManager!.delete(_currentRouteAnnotation!);
+          
+          final updatedPolylineOptions = PolylineAnnotationOptions(
+            geometry: LineString(coordinates: remainingCoordinates),
+            lineColor: SwiftDashColors.lightBlue.value,
+            lineWidth: 5.0,
+            lineOpacity: 0.8,
+          );
+          
+          _currentRouteAnnotation = await _routePolylineManager!.create(updatedPolylineOptions);
+          
+          // Update the original coordinates to the new trimmed version
+          _originalRouteCoordinates = remainingCoordinates;
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error updating route polyline: $e');
+    }
+  }
+  
+  /// 🆕 Find the index of the closest point on the route to the driver's location
+  int _findClosestPointIndex(double lat, double lon, List<Position> coordinates) {
+    double minDistance = double.infinity;
+    int closestIndex = 0;
+    
+    for (int i = 0; i < coordinates.length; i++) {
+      final point = coordinates[i];
+      final distance = _calculateDistance(lat, lon, point.lat.toDouble(), point.lng.toDouble());
+      
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestIndex = i;
+      }
+    }
+    
+    return closestIndex;
   }
   
   /// Add pickup and delivery location pins
@@ -2676,42 +2841,44 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         await _dropoffMarkerManager!.deleteAll();
       }
       
-      // Create separate circle annotation managers for pickup and delivery
-      _pickupMarkerManager = await _mapboxMap!.annotations.createCircleAnnotationManager();
-      _dropoffMarkerManager = await _mapboxMap!.annotations.createCircleAnnotationManager();
+      // 🎯 Create Point annotation managers for pickup and delivery icons
+      _pickupMarkerManager = await _mapboxMap!.annotations.createPointAnnotationManager();
+      _dropoffMarkerManager = await _mapboxMap!.annotations.createPointAnnotationManager();
       
-      // Pickup marker (green circle)
-      final pickupOptions = CircleAnnotationOptions(
+      // 📍 Pickup marker (green circle with white border - Maki icon)
+      final pickupOptions = PointAnnotationOptions(
         geometry: Point(
           coordinates: Position(
             delivery.pickupLongitude,
             delivery.pickupLatitude,
           ),
         ),
-        circleRadius: 12.0,
-        circleColor: Colors.green.value,
-        circleStrokeColor: Colors.white.value,
-        circleStrokeWidth: 3.0,
+        iconImage: 'circle-15', // Maki icon: green circle
+        iconSize: 1.5,
+        iconColor: 0xFF22C55E, // Green color (ARGB)
+        iconHaloColor: 0xFFFFFFFF, // White halo/border (ARGB)
+        iconHaloWidth: 2.0,
       );
       
-      // Delivery marker (red circle)
-      final deliveryOptions = CircleAnnotationOptions(
+      // 🎯 Delivery marker (red location pin - Maki icon)
+      final deliveryOptions = PointAnnotationOptions(
         geometry: Point(
           coordinates: Position(
             delivery.deliveryLongitude,
             delivery.deliveryLatitude,
           ),
         ),
-        circleRadius: 12.0,
-        circleColor: Colors.red.value,
-        circleStrokeColor: Colors.white.value,
-        circleStrokeWidth: 3.0,
+        iconImage: 'marker-15', // Maki icon: classic map pin
+        iconSize: 2.0, // Larger for destination
+        iconColor: 0xFFEF4444, // Red color (ARGB)
+        iconHaloColor: 0xFFFFFFFF, // White halo/border (ARGB)
+        iconHaloWidth: 2.0,
       );
       
       await _pickupMarkerManager!.create(pickupOptions);
       await _dropoffMarkerManager!.create(deliveryOptions);
       
-      print('✅ Pickup (green pin) and delivery (red pin) added');
+      print('✅ Pickup (green circle) and delivery (red pin) markers added');
     } catch (e) {
       print('❌ Error adding delivery pins: $e');
     }

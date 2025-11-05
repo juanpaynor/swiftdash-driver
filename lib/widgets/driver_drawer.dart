@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../services/driver_flow_service.dart';
 import '../core/supabase_config.dart';
 import '../screens/improved_edit_profile_screen.dart';
+import '../screens/navigation_settings_screen.dart';
 
 class DriverDrawer extends StatelessWidget {
   const DriverDrawer({super.key});
@@ -207,11 +208,13 @@ class DriverDrawer extends StatelessWidget {
                 ),
                 _buildDrawerItem(
                   icon: Icons.settings,
-                  title: 'Settings',
+                  title: 'Navigation Settings',
                   onTap: () {
                     Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Settings coming soon!')),
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (context) => const NavigationSettingsScreen(),
+                      ),
                     );
                   },
                 ),

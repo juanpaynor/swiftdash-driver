@@ -53,4 +53,20 @@ class ValidationUtils {
     // Basic validation: must have at least 2 characters and contain letters
     return model.trim().length >= 2 && RegExp(r'[a-zA-Z]').hasMatch(model);
   }
+  
+  /// Validates Philippine phone number format
+  /// Accepts formats like: 09XXXXXXXXX, +639XXXXXXXXX, 639XXXXXXXXX
+  static bool isValidPhoneNumber(String phoneNumber) {
+    if (phoneNumber.isEmpty) return false;
+    
+    // Remove spaces and hyphens
+    final cleaned = phoneNumber.replaceAll(RegExp(r'[\s\-]'), '');
+    
+    // Philippine phone number patterns:
+    // Mobile: 09XXXXXXXXX (11 digits starting with 09)
+    // International: +639XXXXXXXXX or 639XXXXXXXXX
+    final phoneRegex = RegExp(r'^(\+?63|0)?9\d{9}$');
+    
+    return phoneRegex.hasMatch(cleaned);
+  }
 }

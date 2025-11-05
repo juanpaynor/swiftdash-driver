@@ -1755,11 +1755,11 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
         await ChatService().initialize(ablyKey);
       }
 
-      // Query driver_profiles table (not 'drivers')
+      // Query driver_profiles table using 'id' column (not 'user_id')
       final driver = await supabase
           .from('driver_profiles')
           .select('id, first_name, last_name')
-          .eq('user_id', supabase.auth.currentUser!.id)
+          .eq('id', supabase.auth.currentUser!.id)
           .single();
 
       final String driverName = '${driver['first_name']} ${driver['last_name']}';

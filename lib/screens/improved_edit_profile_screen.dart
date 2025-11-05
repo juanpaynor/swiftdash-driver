@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:image_picker/image_picker.dart';
 import '../services/document_upload_service.dart';
 import '../services/auth_service.dart';
 import '../utils/validation_utils.dart';
@@ -155,7 +156,7 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
   }
 
   Future<void> _pick(String type) async {
-    final File? pickedFile = await _docService.pickImage();
+    final File? pickedFile = await _docService.captureImage(source: ImageSource.gallery);
     if (pickedFile == null) return;
 
     // Check file size (5MB limit)
@@ -219,34 +220,32 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
       String? ltfrbUrl = _existingLtfrbUrl;
 
       if (_profileImage != null) {
-        profileUrl = await _docService.uploadDriverDocument(
+        profileUrl = await _docService.uploadDriverProfilePicture(
           _profileImage!,
           user.id,
-          'profile_picture',
         );
       }
 
       if (_vehicleSideImage != null) {
-        vehicleSideUrl = await _docService.uploadDriverDocument(
-          _vehicleSideImage!,
-          user.id,
-          'vehicle_side',
+        vehicleSideUrl = await _docService.uploadToStorage(
+          imageFile: _vehicleSideImage!,
+          bucket: 'driver_profile_pictures',
+          fileName: '${user.id}_vehicle_side.jpg',
         );
       }
 
       if (_vehicleBackImage != null) {
-        vehicleBackUrl = await _docService.uploadDriverDocument(
-          _vehicleBackImage!,
-          user.id,
-          'vehicle_back',
+        vehicleBackUrl = await _docService.uploadToStorage(
+          imageFile: _vehicleBackImage!,
+          bucket: 'driver_profile_pictures',
+          fileName: '${user.id}_vehicle_back.jpg',
         );
       }
 
       if (_ltfrbImage != null) {
-        ltfrbUrl = await _docService.uploadDriverDocument(
+        ltfrbUrl = await _docService.uploadLTFRBPicture(
           _ltfrbImage!,
           user.id,
-          'ltfrb',
         );
       }
 
@@ -271,7 +270,7 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
       if (_plateNumberController.text.trim() != (_currentDriver?.plateNumber ?? '')) {
         updateData['plate_number'] = _plateNumberController.text.trim();
       }
-      if (_ltfrbController.text.trim() != _currentDriver?.licenseNumber ?? '') {
+      if (_ltfrbController.text.trim() != (_currentDriver?.licenseNumber ?? '')) {
         updateData['ltfrb_number'] = _ltfrbController.text.trim();
       }
 
@@ -351,7 +350,7 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
         ),
         child: hasImage
             ? ClipRRect(
-                borderRadius: isCircle ? null : BorderRadius.circular(14),
+                borderRadius: isCircle ? BorderRadius.circular(70) : BorderRadius.circular(14),
                 child: imageFile != null
                     ? Image.file(imageFile, fit: BoxFit.cover)
                     : CachedNetworkImage(
