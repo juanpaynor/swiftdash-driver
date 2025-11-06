@@ -24,6 +24,7 @@ import 'widgets/background_service_status_widget.dart';
 import 'services/device_compatibility_service.dart';
 import 'services/navigation_manager.dart';
 import 'services/optimized_state_manager.dart';
+import 'services/delivery_offer_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -64,6 +65,9 @@ Future<void> _initializeServicesInBackground() async {
   
   // Check device compatibility and initialize background service - non-blocking
   _initBackgroundServices();
+  
+  // Initialize delivery offer notification service - non-blocking
+  _initDeliveryOfferNotifications();
 }
 
 /// Initialize Ably service in background
@@ -118,6 +122,20 @@ void _initBackgroundServices() {
     } catch (e) {
       print('❌ Background service check failed: $e');
       print('🔄 App will continue with OptimizedLocationService');
+    }
+  });
+}
+
+/// Initialize delivery offer notification service
+void _initDeliveryOfferNotifications() {
+  Future(() async {
+    try {
+      print('🔔 Initializing delivery offer notifications...');
+      await DeliveryOfferNotificationService.initialize();
+      print('✅ Delivery offer notifications ready');
+    } catch (e) {
+      print('⚠️ Failed to initialize delivery offer notifications: $e');
+      print('🔄 App will continue without background offer notifications');
     }
   });
 }

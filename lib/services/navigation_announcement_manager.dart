@@ -196,6 +196,21 @@ class NavigationAnnouncementManager {
     developer.log('Cleared announcement history', 
       name: 'NavigationAnnouncementManager');
   }
+  
+  /// 🆕 Clear announcements for new instruction (keeps old ones to prevent repeats)
+  void clearAnnouncementsForNewInstruction() {
+    _announcedInstructions.clear();
+    developer.log('Cleared announcements for new instruction', 
+      name: 'NavigationAnnouncementManager');
+  }
+  
+  /// 🆕 Immediately announce a new instruction (used when advancing to next instruction)
+  Future<void> announceImmediateInstruction(NavigationInstruction instruction) async {
+    final announcement = instruction.instruction;
+    await _voiceService.speak(announcement, priority: true);
+    developer.log('Immediately announced: $announcement', 
+      name: 'NavigationAnnouncementManager');
+  }
 
   /// Reset the announcement manager (e.g., when navigation ends)
   Future<void> reset() async {

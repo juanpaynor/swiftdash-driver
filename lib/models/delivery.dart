@@ -124,10 +124,12 @@ class Delivery {
     this.assignmentType,
   });
   
-  // Calculate driver earnings (you can adjust this percentage)
-  /// Driver's earnings after 16% platform commission
-  /// Driver gets 84%, platform takes 16%
-  double get driverEarnings => totalPrice * 0.84;
+  // DEPRECATED: Hard-coded commission calculation
+  // Use CommissionService.calculateCommission() instead for dynamic rates
+  /// Driver's earnings after platform commission
+  /// @deprecated Use CommissionService for accurate, dynamic commission rates
+  @Deprecated('Use CommissionService.calculateCommission() for dynamic rates')
+  double get driverEarnings => totalPrice * 0.84; // Fallback: 16% commission
   
   // Map database payment method to app payment method
   PaymentMethod get mappedPaymentMethod {

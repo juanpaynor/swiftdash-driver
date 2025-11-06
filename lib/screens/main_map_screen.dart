@@ -4,6 +4,7 @@ import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -78,6 +79,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   mapbox_svc.RouteData? _routeData;
   List<Position>? _originalRouteCoordinates; // 🆕 Store original route for trimming
   PolylineAnnotation? _currentRouteAnnotation; // 🆕 Store current polyline annotation
+  int? _lastClosestIndex; // 🆕 Track last closest index for smooth polyline updates
   
   // Route preview for incoming offers - simplified tracking
   Delivery? _currentOffer;
@@ -101,6 +103,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   
   // Track if we've already shown active delivery notification for current delivery
   String? _lastActiveDeliveryNotificationId;
+  
+  // Flag to prevent camera listener from unlocking during programmatic camera updates
+  bool _isProgrammaticCameraUpdate = false;
   
   @override
   void initState() {
@@ -1076,12 +1081,13 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       context: context,
       builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+        child: SingleChildScrollView(
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               // Header
               Row(
                 children: [
@@ -1171,9 +1177,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
                 child: Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: () {
+                    onTap: () async {
                       Navigator.pop(context);
-                      _startProfessionalNavigation(lat, lng, delivery);
+                      await _showBetaWarningIfNeeded(lat, lng, delivery);
                     },
                     borderRadius: BorderRadius.circular(16),
                     child: Padding(
@@ -1304,6 +1310,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
                 ),
               ),
             ],
+            ),
           ),
         ),
       ),
@@ -1405,6 +1412,188 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     }
   }
   
+  /// 🎯 Show beta warning modal before starting navigation (with "don't show again" option)
+  Future<void> _showBetaWarningIfNeeded(double lat, double lng, Delivery delivery) async {
+    final prefs = await SharedPreferences.getInstance();
+    final dontShowAgain = prefs.getBool('navigation_beta_warning_dismissed') ?? false;
+    
+    if (dontShowAgain) {
+      // User chose to not see the warning again, proceed directly
+      await _startProfessionalNavigation(lat, lng, delivery);
+      return;
+    }
+    
+    // Show beta warning modal
+    bool checkboxValue = false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.science,
+                      color: Colors.orange,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Beta Feature',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'SwiftDash Navigation is currently in beta testing.',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Please be aware that you may encounter bugs or unexpected behavior during navigation. We appreciate your patience as we continue to improve this feature.',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: Colors.blue.withOpacity(0.3),
+                      ),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'You can always use Google Maps or Waze as an alternative.',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.blue,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  InkWell(
+                    onTap: () {
+                      setState(() {
+                        checkboxValue = !checkboxValue;
+                      });
+                    },
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: Checkbox(
+                            value: checkboxValue,
+                            onChanged: (value) {
+                              setState(() {
+                                checkboxValue = value ?? false;
+                              });
+                            },
+                            activeColor: SwiftDashColors.darkBlue,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Don\'t show this again',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop(false);
+                  },
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (checkboxValue) {
+                      await prefs.setBool('navigation_beta_warning_dismissed', true);
+                    }
+                    Navigator.of(context).pop(true);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: SwiftDashColors.darkBlue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Continue',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    
+    // If user clicked "Continue", start navigation
+    if (result == true) {
+      await _startProfessionalNavigation(lat, lng, delivery);
+    }
+  }
+  
   /// 🧭 NEW: Start professional in-app navigation using NavigationService
   Future<void> _startProfessionalNavigation(double lat, double lng, Delivery delivery) async {
     if (_currentPosition == null) {
@@ -1432,6 +1621,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       if (success) {
         setState(() {
           _isNavigating = true;
+          _lastClosestIndex = null; // 🆕 Reset for smooth polyline tracking
         });
         
         // Show success message
@@ -1466,6 +1656,18 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
               },
             );
           }
+        }
+        
+        // 🔍 Route should already be drawn by startNavigationToDelivery via RoutePreviewService
+        // The NavigationService gets its route from the same source
+        final navigationRoute = _navigationService.currentRoute;
+        if (navigationRoute != null) {
+          debugPrint('📍 Navigation route available:');
+          debugPrint('   Distance: ${navigationRoute.totalDistance}m');
+          debugPrint('   Duration: ${navigationRoute.totalDuration} mins');
+          debugPrint('   Instructions: ${navigationRoute.instructions.length}');
+        } else {
+          debugPrint('⚠️ No route data available from navigation service');
         }
         
         // Setup location tracking for navigation
@@ -1514,8 +1716,8 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
           _updateNavigationCamera(_currentPosition!);
         }
         
-        // 🆕 Update route polyline to show progress (shrinking effect)
-        _updateRoutePolyline(_currentPosition!);
+        // ✅ Option 4: Dual polylines with smooth transitions (traveled gray + remaining blue)
+        _updateDualPolylinesSmooth(_currentPosition!);
       }
     });
     
@@ -1549,6 +1751,12 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     try {
       debugPrint('🎥 Enabling navigation camera mode');
       
+      // ✅ Enable camera lock for auto-follow
+      _isNavigationCameraLocked = true;
+      
+      // Mark as programmatic update
+      _isProgrammaticCameraUpdate = true;
+      
       // Set initial camera position with 3D tilt for navigation
       await _mapboxMap!.flyTo(
         CameraOptions(
@@ -1565,17 +1773,27 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         MapAnimationOptions(duration: 1000, startDelay: 0),
       );
       
-      debugPrint('✅ Navigation camera mode enabled');
+      // Reset flag after animation
+      await Future.delayed(const Duration(milliseconds: 1100));
+      _isProgrammaticCameraUpdate = false;
+      
+      debugPrint('✅ Navigation camera mode enabled with auto-follow');
     } catch (e) {
       debugPrint('❌ Error enabling navigation camera: $e');
+      _isProgrammaticCameraUpdate = false;
     }
   }
   
   /// Update camera to follow driver during navigation
   Future<void> _updateNavigationCamera(geo.Position location) async {
-    if (_mapboxMap == null || !_isNavigating) return;
+    if (_mapboxMap == null || !_isNavigating || !_isNavigationCameraLocked) return;
     
     try {
+      debugPrint('🎥 Updating navigation camera: ${location.latitude}, ${location.longitude}, heading: ${location.heading}');
+      
+      // Mark as programmatic update to prevent listener from unlocking camera
+      _isProgrammaticCameraUpdate = true;
+      
       // Smoothly animate camera to follow driver with heading rotation
       await _mapboxMap!.easeTo(
         CameraOptions(
@@ -1591,8 +1809,13 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         ),
         MapAnimationOptions(duration: 800, startDelay: 0),
       );
+      
+      // Reset flag after a short delay (allow camera animation to complete)
+      await Future.delayed(const Duration(milliseconds: 900));
+      _isProgrammaticCameraUpdate = false;
     } catch (e) {
       debugPrint('❌ Error updating navigation camera: $e');
+      _isProgrammaticCameraUpdate = false; // Reset on error
     }
   }
   
@@ -1603,8 +1826,8 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     try {
       debugPrint('🎥 Disabling navigation camera mode');
       
-      // Reset camera lock state
-      _isNavigationCameraLocked = true;
+      // ✅ Disable camera lock (stop auto-follow)
+      _isNavigationCameraLocked = false;
       
       // Return to normal top-down view
       await _mapboxMap!.flyTo(
@@ -1641,24 +1864,35 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       // Re-enable location puck after style change
       await Future.delayed(const Duration(milliseconds: 500));
       
-      // Re-create navigation arrow puck
-      final navigationArrowImage = await _createNavigationArrowImage();
+      // Re-create modern driver puck
+      final driverPuckImage = await _createDriverPuckImage();
       await _mapboxMap!.location.updateSettings(LocationComponentSettings(
         enabled: true,
         puckBearingEnabled: true,
         pulsingEnabled: true,
-        pulsingColor: const Color(0xFFFF6B35).value,
-        pulsingMaxRadius: 30.0,
+        pulsingColor: const Color(0xFF0EA5E9).value, // Cyan-blue pulse
+        pulsingMaxRadius: 25.0,
         locationPuck: LocationPuck(
           locationPuck2D: LocationPuck2D(
-            topImage: navigationArrowImage,
-            bearingImage: navigationArrowImage,
+            topImage: driverPuckImage,
+            bearingImage: driverPuckImage,
             shadowImage: null,
           ),
         ),
       ));
       
-      debugPrint('✅ Navigation map style loaded');
+      // 🆕 ISSUE FIX #5: Redraw route polyline after style change
+      if (_routeData != null) {
+        debugPrint('🗺️ Redrawing route polyline after style change...');
+        await _drawRouteOnMap(_routeData!);
+        
+        // Also redraw delivery pins
+        if (_driverFlow.activeDelivery != null) {
+          await _addDeliveryPins(_driverFlow.activeDelivery!);
+        }
+      }
+      
+      debugPrint('✅ Navigation map style loaded with route');
     } catch (e) {
       debugPrint('❌ Error loading navigation map style: $e');
     }
@@ -1675,18 +1909,18 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       // Re-enable location puck after style change
       await Future.delayed(const Duration(milliseconds: 500));
       
-      // Re-create navigation arrow puck
-      final navigationArrowImage = await _createNavigationArrowImage();
+      // Re-create modern driver puck (orange pulse for idle mode)
+      final driverPuckImage = await _createDriverPuckImage();
       await _mapboxMap!.location.updateSettings(LocationComponentSettings(
         enabled: true,
         puckBearingEnabled: true,
         pulsingEnabled: true,
-        pulsingColor: const Color(0xFFFF6B35).value,
-        pulsingMaxRadius: 30.0,
+        pulsingColor: const Color(0xFFFF6B35).value, // Orange pulse for idle
+        pulsingMaxRadius: 25.0,
         locationPuck: LocationPuck(
           locationPuck2D: LocationPuck2D(
-            topImage: navigationArrowImage,
-            bearingImage: navigationArrowImage,
+            topImage: driverPuckImage,
+            bearingImage: driverPuckImage,
             shadowImage: null,
           ),
         ),
@@ -1704,6 +1938,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     
     try {
       debugPrint('🎯 Re-centering navigation camera');
+      
+      // Mark as programmatic update
+      _isProgrammaticCameraUpdate = true;
       
       // Lock camera back to auto-follow
       setState(() {
@@ -1726,14 +1963,24 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         MapAnimationOptions(duration: 800, startDelay: 0),
       );
       
+      // Reset flag after animation
+      await Future.delayed(const Duration(milliseconds: 900));
+      _isProgrammaticCameraUpdate = false;
+      
       debugPrint('✅ Navigation camera re-centered');
     } catch (e) {
       debugPrint('❌ Error re-centering camera: $e');
+      _isProgrammaticCameraUpdate = false;
     }
   }
   
   /// Detect when user manually moves camera during navigation
   void _onCameraChange(CameraChangedEventData data) {
+    // Ignore programmatic camera updates (auto-follow)
+    if (_isProgrammaticCameraUpdate) {
+      return;
+    }
+    
     // Only unlock if we're in navigation and camera is currently locked
     if (_isNavigating && _isNavigationCameraLocked) {
       // User is manually controlling camera - unlock auto-follow
@@ -1747,6 +1994,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   /// Handle delivery status change from draggable panel
   Future<void> _handleDeliveryStatusChange(DeliveryStage newStage) async {
     print('🔄 Delivery status changing to: ${newStage.name}');
+    print('🔄 Current delivery status before refresh: ${_driverFlow.activeDelivery?.status}');
     
     try {
       // If delivery is complete, show completion screen
@@ -1784,6 +2032,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       // Refresh the driver flow to update the delivery
       print('🔄 Reloading delivery from database to get updated status...');
       await _driverFlow.refreshActiveDelivery();
+      print('🔄 Delivery status after refresh: ${_driverFlow.activeDelivery?.status}');
       
       // Get the updated delivery
       final updatedDelivery = _driverFlow.activeDelivery;
@@ -1845,6 +2094,33 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   /// Show completion screen after successful delivery
   Future<void> _showCompletionScreen(Delivery delivery) async {
     if (!mounted) return;
+    
+    // 🗺️ ISSUE FIX #1: Switch back to default map style after delivery completion
+    await _switchToDefaultMapStyle();
+    
+    // 🧭 ISSUE FIX: Stop navigation and reset camera
+    if (_isNavigating) {
+      await _navigationService.stopNavigation();
+      setState(() {
+        _isNavigating = false;
+        _lastClosestIndex = null; // 🆕 Reset polyline tracking
+      });
+      await _disableNavigationCameraMode();
+    }
+    
+    // Clear route and markers
+    if (_routePolylineManager != null) {
+      await _routePolylineManager!.deleteAll();
+    }
+    if (_traveledRouteManager != null) {
+      await _traveledRouteManager!.deleteAll();
+    }
+    if (_pickupMarkerManager != null) {
+      await _pickupMarkerManager!.deleteAll();
+    }
+    if (_dropoffMarkerManager != null) {
+      await _dropoffMarkerManager!.deleteAll();
+    }
     
     // Navigate to completion screen
     await Navigator.of(context).push(
@@ -1961,19 +2237,20 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       _currentPosition = position;
       print('📍 Current position: ${position.latitude}, ${position.longitude}');
       
-      // 🎯 USE MAPBOX LOCATION PUCK with navigation-style chevron/arrow
-      final navigationArrowImage = await _createNavigationArrowImage();
+      // 🎯 USE MAPBOX LOCATION PUCK with Maki car icon (modern, built-in)
+      // Create a simple blue circle with white car icon overlay
+      final driverPuckImage = await _createDriverPuckImage();
       
       await _mapboxMap!.location.updateSettings(LocationComponentSettings(
         enabled: true,
         puckBearingEnabled: true, // Show bearing/direction for navigation
         pulsingEnabled: true, // Pulsing animation
-        pulsingColor: const Color(0xFFFF6B35).value, // SwiftDash orange pulse
-        pulsingMaxRadius: 30.0,
+        pulsingColor: const Color(0xFF0EA5E9).value, // Cyan-blue pulse
+        pulsingMaxRadius: 25.0,
         locationPuck: LocationPuck(
           locationPuck2D: LocationPuck2D(
-            topImage: navigationArrowImage,
-            bearingImage: navigationArrowImage,
+            topImage: driverPuckImage,
+            bearingImage: driverPuckImage,
             shadowImage: null,
           ),
         ),
@@ -2750,15 +3027,18 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       final lineString = LineString.fromJson(routeData.geometry);
       _originalRouteCoordinates = lineString.coordinates.toList();
       
-      // Create polyline from route geometry
+      // Create polyline from route geometry (bright color for dark mode visibility)
       final polylineOptions = PolylineAnnotationOptions(
         geometry: lineString,
-        lineColor: SwiftDashColors.lightBlue.value,
-        lineWidth: 5.0,
-        lineOpacity: 0.8,
+        lineColor: const Color(0xFF00D9FF).value, // ✅ Bright cyan - highly visible on dark maps
+        lineWidth: 6.0, // Thicker for better visibility
+        lineOpacity: 1.0, // Full opacity
       );
       
       _currentRouteAnnotation = await _routePolylineManager!.create(polylineOptions);
+      
+      // 🌟 Set emissive strength for dark mode visibility (makes polyline glow)
+      await _routePolylineManager!.setLineEmissiveStrength(1.5);
       
       print('✅ Route polyline drawn on map (${_originalRouteCoordinates?.length} points)');
     } catch (e) {
@@ -2766,7 +3046,8 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     }
   }
   
-  /// 🆕 Update route polyline to remove traveled segments (shrinking effect)
+  /// 🆕 OPTION 1: Update route polyline to remove traveled segments (shrinking effect)
+  /// ⚠️ DISABLED by default - uncomment in _setupNavigationLocationTracking() to enable
   Future<void> _updateRoutePolyline(geo.Position driverLocation) async {
     if (_routePolylineManager == null || 
         _currentRouteAnnotation == null || 
@@ -2800,6 +3081,8 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
           );
           
           _currentRouteAnnotation = await _routePolylineManager!.create(updatedPolylineOptions);
+          // 🌟 Set emissive strength for dark mode visibility
+          await _routePolylineManager!.setLineEmissiveStrength(1.5);
           
           // Update the original coordinates to the new trimmed version
           _originalRouteCoordinates = remainingCoordinates;
@@ -2807,6 +3090,147 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       }
     } catch (e) {
       debugPrint('❌ Error updating route polyline: $e');
+    }
+  }
+  
+  /// 🆕 OPTION 2: Dual polylines - traveled (gray) + remaining (blue)
+  /// Shows progress visually without losing route visibility
+  PolylineAnnotationManager? _traveledRouteManager;
+  PolylineAnnotation? _traveledRouteAnnotation;
+  
+  /// 🎨 Option 4: Update dual polylines with smooth transitions
+  /// Shows traveled path (gray) and remaining path (blue) with smooth updates
+  Future<void> _updateDualPolylinesSmooth(geo.Position driverLocation) async {
+    if (_routePolylineManager == null || 
+        _originalRouteCoordinates == null ||
+        _originalRouteCoordinates!.isEmpty) {
+      return;
+    }
+    
+    try {
+      // Initialize traveled route manager if needed
+      if (_traveledRouteManager == null && _mapboxMap != null) {
+        _traveledRouteManager = await _mapboxMap!.annotations.createPolylineAnnotationManager();
+      }
+      
+      // Find the closest point on the route
+      int closestIndex = _findClosestPointIndex(
+        driverLocation.latitude,
+        driverLocation.longitude,
+        _originalRouteCoordinates!,
+      );
+      
+      // Only update if driver has progressed significantly (prevents jittery updates)
+      if (closestIndex > 0 && closestIndex > (_lastClosestIndex ?? 0)) {
+        _lastClosestIndex = closestIndex;
+        
+        // Traveled path (gray/dimmed) - from start to current position
+        final traveledCoordinates = _originalRouteCoordinates!.sublist(0, closestIndex + 1);
+        
+        // Remaining path (bright blue) - from current position to destination
+        final remainingCoordinates = _originalRouteCoordinates!.sublist(closestIndex);
+        
+        // 🎨 Smooth transition: Update traveled polyline
+        if (_traveledRouteAnnotation != null && _traveledRouteManager != null) {
+          await _traveledRouteManager!.delete(_traveledRouteAnnotation!);
+        }
+        
+        if (traveledCoordinates.length > 1 && _traveledRouteManager != null) {
+          final traveledOptions = PolylineAnnotationOptions(
+            geometry: LineString(coordinates: traveledCoordinates),
+            lineColor: Colors.grey.withOpacity(0.4).value, // Subtle gray
+            lineWidth: 4.0,
+            lineOpacity: 0.5,
+          );
+          _traveledRouteAnnotation = await _traveledRouteManager!.create(traveledOptions);
+          // 🌟 Set subtle glow for traveled path (dark mode visibility)
+          await _traveledRouteManager!.setLineEmissiveStrength(0.5);
+        }
+        
+        // 🎨 Smooth transition: Update remaining polyline
+        if (_currentRouteAnnotation != null && _routePolylineManager != null) {
+          await _routePolylineManager!.delete(_currentRouteAnnotation!);
+        }
+        
+        if (remainingCoordinates.length > 1) {
+          final remainingOptions = PolylineAnnotationOptions(
+            geometry: LineString(coordinates: remainingCoordinates),
+            lineColor: const Color(0xFF0EA5E9).value, // Vibrant cyan-blue
+            lineWidth: 6.0,
+            lineOpacity: 1.0,
+          );
+          _currentRouteAnnotation = await _routePolylineManager!.create(remainingOptions);
+          // 🌟 Set strong glow for remaining route (dark mode visibility)
+          await _routePolylineManager!.setLineEmissiveStrength(1.5);
+        }
+        
+        debugPrint('✅ Smooth polyline update: traveled=${traveledCoordinates.length} pts, remaining=${remainingCoordinates.length} pts');
+      }
+    } catch (e) {
+      debugPrint('❌ Error updating dual polylines smoothly: $e');
+    }
+  }
+  
+  /// Old method kept for reference - not used
+  Future<void> _updateDualPolylines(geo.Position driverLocation) async {
+    if (_routePolylineManager == null || 
+        _originalRouteCoordinates == null ||
+        _originalRouteCoordinates!.isEmpty) {
+      return;
+    }
+    
+    try {
+      // Initialize traveled route manager if needed
+      if (_traveledRouteManager == null && _mapboxMap != null) {
+        _traveledRouteManager = await _mapboxMap!.annotations.createPolylineAnnotationManager();
+      }
+      
+      // Find the closest point on the route
+      int closestIndex = _findClosestPointIndex(
+        driverLocation.latitude,
+        driverLocation.longitude,
+        _originalRouteCoordinates!,
+      );
+      
+      if (closestIndex > 0) {
+        // Traveled path (gray/dimmed)
+        final traveledCoordinates = _originalRouteCoordinates!.sublist(0, closestIndex + 1);
+        
+        // Remaining path (bright blue)
+        final remainingCoordinates = _originalRouteCoordinates!.sublist(closestIndex);
+        
+        // Update traveled polyline
+        if (_traveledRouteAnnotation != null && _traveledRouteManager != null) {
+          await _traveledRouteManager!.delete(_traveledRouteAnnotation!);
+        }
+        
+        if (traveledCoordinates.length > 1 && _traveledRouteManager != null) {
+          final traveledOptions = PolylineAnnotationOptions(
+            geometry: LineString(coordinates: traveledCoordinates),
+            lineColor: Colors.grey.withOpacity(0.5).value, // Dimmed gray
+            lineWidth: 4.0,
+            lineOpacity: 0.6,
+          );
+          _traveledRouteAnnotation = await _traveledRouteManager!.create(traveledOptions);
+        }
+        
+        // Update remaining polyline
+        if (_currentRouteAnnotation != null && _routePolylineManager != null) {
+          await _routePolylineManager!.delete(_currentRouteAnnotation!);
+        }
+        
+        if (remainingCoordinates.length > 1) {
+          final remainingOptions = PolylineAnnotationOptions(
+            geometry: LineString(coordinates: remainingCoordinates),
+            lineColor: SwiftDashColors.lightBlue.value, // Bright blue
+            lineWidth: 5.0,
+            lineOpacity: 0.9,
+          );
+          _currentRouteAnnotation = await _routePolylineManager!.create(remainingOptions);
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error updating dual polylines: $e');
     }
   }
   
@@ -2845,7 +3269,11 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       _pickupMarkerManager = await _mapboxMap!.annotations.createPointAnnotationManager();
       _dropoffMarkerManager = await _mapboxMap!.annotations.createPointAnnotationManager();
       
-      // 📍 Pickup marker (green circle with white border - Maki icon)
+      // Create custom marker images
+      final pickupMarkerImage = await _createPickupMarkerImage();
+      final dropoffMarkerImage = await _createDropoffMarkerImage();
+      
+      // 📍 Pickup marker (green circle with "P")
       final pickupOptions = PointAnnotationOptions(
         geometry: Point(
           coordinates: Position(
@@ -2853,14 +3281,11 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
             delivery.pickupLatitude,
           ),
         ),
-        iconImage: 'circle-15', // Maki icon: green circle
-        iconSize: 1.5,
-        iconColor: 0xFF22C55E, // Green color (ARGB)
-        iconHaloColor: 0xFFFFFFFF, // White halo/border (ARGB)
-        iconHaloWidth: 2.0,
+        image: pickupMarkerImage,
+        iconSize: 0.8,
       );
       
-      // 🎯 Delivery marker (red location pin - Maki icon)
+      // 🎯 Delivery marker (red pin with "D")
       final deliveryOptions = PointAnnotationOptions(
         geometry: Point(
           coordinates: Position(
@@ -2868,11 +3293,8 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
             delivery.deliveryLatitude,
           ),
         ),
-        iconImage: 'marker-15', // Maki icon: classic map pin
-        iconSize: 2.0, // Larger for destination
-        iconColor: 0xFFEF4444, // Red color (ARGB)
-        iconHaloColor: 0xFFFFFFFF, // White halo/border (ARGB)
-        iconHaloWidth: 2.0,
+        image: dropoffMarkerImage,
+        iconSize: 0.8,
       );
       
       await _pickupMarkerManager!.create(pickupOptions);
@@ -2998,6 +3420,17 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     print('🚫 Delivery cancelled by customer: ${delivery.id}');
     
     try {
+      // 🧭 CRITICAL: Stop navigation if active
+      if (_isNavigating) {
+        await _navigationService.stopNavigation();
+        setState(() {
+          _isNavigating = false;
+          _lastClosestIndex = null; // Reset polyline tracking
+        });
+        await _disableNavigationCameraMode();
+        print('🧭 Navigation stopped due to cancellation');
+      }
+      
       // 🚨 CRITICAL: If this is the current offer, close the offer modal
       if (_currentOffer?.id == delivery.id) {
         print('🚨 Cancelled delivery matches current offer - closing offer modal');
@@ -3008,8 +3441,16 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         await _clearOfferVisualization();
       }
       
-      // Clear map visualization (polylines, markers)
+      // Clear map visualization (polylines, markers, INCLUDING traveled route)
       await _clearDeliveryRoute();
+      
+      // Clear traveled route polyline (for dual polyline navigation)
+      if (_traveledRouteManager != null) {
+        await _traveledRouteManager!.deleteAll();
+      }
+      
+      // 🗺️ Switch back to default map style
+      await _switchToDefaultMapStyle();
       
       // 🎯 DISABLE LOCATION PUCK when delivery is cancelled
       if (_mapboxMap != null) {
@@ -3087,41 +3528,157 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     }
   }
   
-  /// Create a navigation-style arrow/chevron image for the location puck
-  /// Returns a blue chevron pointing upward (bearing will rotate it)
-  Future<Uint8List> _createNavigationArrowImage() async {
-    const size = 80.0; // Size of the canvas
+  /// Create a modern driver puck image with directional arrow
+  /// This replaces the old custom chevron with a cleaner, more professional look
+  Future<Uint8List> _createDriverPuckImage() async {
+    const size = 100.0; // Slightly larger for better visibility
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, size, size));
-    final paint = Paint()
-      ..color = const Color(0xFF1E88E5) // Material blue
-      ..style = PaintingStyle.fill;
-    
-    final borderPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 4.0;
-    
-    // Create a navigation chevron/arrow path
-    final path = Path();
     final centerX = size / 2;
     final centerY = size / 2;
     
-    // Chevron pointing upward
-    path.moveTo(centerX, centerY - 25); // Top point
-    path.lineTo(centerX + 15, centerY - 5); // Right upper
-    path.lineTo(centerX + 8, centerY - 5); // Right inner
-    path.lineTo(centerX + 8, centerY + 25); // Right bottom
-    path.lineTo(centerX - 8, centerY + 25); // Left bottom
-    path.lineTo(centerX - 8, centerY - 5); // Left inner
-    path.lineTo(centerX - 15, centerY - 5); // Left upper
-    path.close();
+    // Draw outer circle (white border)
+    final borderPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(centerX, centerY), 22, borderPaint);
     
-    // Draw the arrow with white border
-    canvas.drawPath(path, borderPaint);
-    canvas.drawPath(path, paint);
+    // Draw inner circle (blue background)
+    final circlePaint = Paint()
+      ..color = const Color(0xFF0EA5E9) // Cyan-blue
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(centerX, centerY), 18, circlePaint);
+    
+    // Draw directional arrow (white, pointing up - bearing will rotate)
+    final arrowPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    
+    final arrowPath = Path();
+    // Sharp arrow pointing upward
+    arrowPath.moveTo(centerX, centerY - 12); // Top point
+    arrowPath.lineTo(centerX + 8, centerY - 2); // Right upper
+    arrowPath.lineTo(centerX + 4, centerY - 2); // Right inner
+    arrowPath.lineTo(centerX + 4, centerY + 10); // Right bottom
+    arrowPath.lineTo(centerX - 4, centerY + 10); // Left bottom
+    arrowPath.lineTo(centerX - 4, centerY - 2); // Left inner
+    arrowPath.lineTo(centerX - 8, centerY - 2); // Left upper
+    arrowPath.close();
+    
+    canvas.drawPath(arrowPath, arrowPaint);
     
     // Convert to image
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    
+    return byteData!.buffer.asUint8List();
+  }
+  
+  /// Create pickup marker image (green circle with "P")
+  Future<Uint8List> _createPickupMarkerImage() async {
+    const size = 80.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, size, size));
+    final centerX = size / 2;
+    final centerY = size / 2;
+    
+    // Draw shadow
+    final shadowPaint = Paint()
+      ..color = Colors.black.withOpacity(0.3)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+    canvas.drawCircle(Offset(centerX + 2, centerY + 2), 25, shadowPaint);
+    
+    // Draw white border
+    final borderPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(centerX, centerY), 25, borderPaint);
+    
+    // Draw green circle
+    final circlePaint = Paint()
+      ..color = const Color(0xFF22C55E) // Green
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(centerX, centerY), 22, circlePaint);
+    
+    // Draw "P" letter in white
+    final textPainter = TextPainter(
+      text: const TextSpan(
+        text: 'P',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 32,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    textPainter.paint(
+      canvas,
+      Offset(centerX - textPainter.width / 2, centerY - textPainter.height / 2),
+    );
+    
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.toInt(), size.toInt());
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    
+    return byteData!.buffer.asUint8List();
+  }
+  
+  /// Create dropoff marker image (red map pin with "D")
+  Future<Uint8List> _createDropoffMarkerImage() async {
+    const size = 100.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, size, size));
+    final centerX = size / 2;
+    final centerY = size / 2;
+    
+    // Draw shadow
+    final shadowPaint = Paint()
+      ..color = Colors.black.withOpacity(0.3)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+    canvas.drawCircle(Offset(centerX + 2, centerY + 2), 20, shadowPaint);
+    
+    // Draw pin shape path
+    final pinPath = Path();
+    pinPath.addOval(Rect.fromCircle(center: Offset(centerX, centerY - 10), radius: 20));
+    pinPath.moveTo(centerX, centerY + 10);
+    pinPath.lineTo(centerX - 12, centerY - 5);
+    pinPath.lineTo(centerX + 12, centerY - 5);
+    pinPath.close();
+    
+    // Draw white border for pin
+    final borderPaint = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4;
+    canvas.drawPath(pinPath, borderPaint);
+    
+    // Draw red pin fill
+    final pinPaint = Paint()
+      ..color = const Color(0xFFEF4444) // Red
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(pinPath, pinPaint);
+    
+    // Draw "D" letter in white
+    final textPainter = TextPainter(
+      text: const TextSpan(
+        text: 'D',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    textPainter.paint(
+      canvas,
+      Offset(centerX - textPainter.width / 2, centerY - 10 - textPainter.height / 2),
+    );
+    
     final picture = recorder.endRecording();
     final image = await picture.toImage(size.toInt(), size.toInt());
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);

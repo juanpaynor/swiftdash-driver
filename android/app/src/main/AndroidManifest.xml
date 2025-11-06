@@ -9,6 +9,7 @@
     <!-- Foreground service permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     
     <!-- Additional permissions for Android 14+ -->
@@ -39,11 +40,11 @@
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         
-        <!-- Foreground service for background location tracking -->
+        <!-- Foreground service for background location tracking and delivery offers -->
         <service
             android:name="id.flutter.flutter_background_service.BackgroundService"
             android:exported="false"
-            android:foregroundServiceType="location"
+            android:foregroundServiceType="location|dataSync"
             tools:replace="android:exported" />
             
         <activity

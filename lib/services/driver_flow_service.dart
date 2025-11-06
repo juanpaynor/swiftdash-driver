@@ -11,6 +11,8 @@ import '../services/ably_service.dart';
 import '../services/chat_service.dart';
 import '../services/idle_location_update_service.dart';
 import '../services/background_location_service.dart';
+import '../services/delivery_offer_notification_service.dart';
+import '../helpers/battery_optimization_helper.dart';
 import '../core/supabase_config.dart';
 
 /// Service to manage the complete driver delivery flow and state transitions
@@ -144,13 +146,56 @@ class DriverFlowService {
       // Reload driver profile to get updated status with location
       _currentDriver = await _authService.getCurrentDriverProfile();
 
-      // 🚨 CRITICAL FIX: Initialize realtime subscriptions to receive delivery offers
+      // 🔋 CRITICAL: Check battery optimization before going online
+      // Only show warning once per session to avoid being annoying
+      try {
+        final hasExemption = await BatteryOptimizationHelper.checkAndRequestOnGoingOnline(context);
+        if (!hasExemption) {
+          print('⚠️ Battery optimization not disabled');
+          // Show subtle warning instead of blocking dialog
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  '⚠️ Battery optimization enabled - you may miss delivery offers when idle',
+                  style: TextStyle(fontSize: 13),
+                ),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 5),
+                action: SnackBarAction(
+                  label: 'Fix',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    BatteryOptimizationHelper.requestBatteryOptimizationExemption(context);
+                  },
+                ),
+              ),
+            );
+          }
+        } else {
+          print('✅ Battery optimization disabled - background notifications will work reliably');
+        }
+      } catch (e) {
+        print('⚠️ Failed to check battery optimization: $e');
+        // Continue anyway
+      }
+
+      // �🚨 CRITICAL FIX: Initialize realtime subscriptions to receive delivery offers
       try {
         await _initializeRealtimeSubscriptions();
         print('🚨 ✅ CRITICAL: Realtime subscriptions initialized - driver can now receive delivery offers!');
       } catch (e) {
         print('🚨 ❌ CRITICAL ERROR: Failed to initialize realtime subscriptions - driver will NOT receive offers: $e');
         _showError(context, 'Warning: You may not receive delivery offers. Please try going offline and online again.');
+      }
+
+      // 🔔 Start listening for delivery offers with background notifications
+      try {
+        await DeliveryOfferNotificationService.startListening(_currentDriver!.id);
+        print('🔔 ✅ Started listening for delivery offers with notifications');
+      } catch (e) {
+        print('⚠️ Failed to start delivery offer notifications: $e');
+        // Continue without background notifications - foreground still works
       }
 
       _showSuccess(context, 'You are now online and available for deliveries');
@@ -183,6 +228,14 @@ class DriverFlowService {
       // Stop idle location updates
       _idleLocationService.stopIdleLocationUpdates();
       print('📍 Stopped idle location updates');
+
+      // 🔔 Stop listening for delivery offers
+      try {
+        await DeliveryOfferNotificationService.stopListening();
+        print('🔔 Stopped listening for delivery offers');
+      } catch (e) {
+        print('⚠️ Failed to stop delivery offer notifications: $e');
+      }
 
       // 🚨 STOP: Foreground service when going offline
       try {

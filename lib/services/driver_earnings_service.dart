@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/cash_remittance.dart';
+import 'commission_service.dart';
 
 class DriverEarning {
   final String id;
@@ -109,6 +110,7 @@ class EarningsSummary {
 
 class DriverEarningsService {
   final SupabaseClient _supabase = Supabase.instance.client;
+  final CommissionService _commissionService = CommissionService();
 
   // Record earnings for a completed delivery
   Future<bool> recordDeliveryEarnings({
@@ -122,10 +124,17 @@ class DriverEarningsService {
     try {
       final today = DateTime.now();
       
-      // Calculate earnings based on payment method
-      final platformCommissionRate = 0.16; // 16% platform commission
-      final platformCommission = totalPrice * platformCommissionRate;
-      final driverNetEarnings = totalPrice - platformCommission + tips;
+      // Get dynamic commission rate from CommissionService
+      final commissionData = await _commissionService.calculateCommission(
+        driverId: driverId,
+        totalPrice: totalPrice,
+        tips: tips,
+      );
+      
+      final platformCommissionRate = commissionData['commission_rate'] as double;
+      final platformCommission = commissionData['commission_amount'] as double;
+      final driverNetEarnings = commissionData['driver_earnings'] as double;
+      final rateSource = commissionData['rate_source'] as String;
       
       // For COD, set remittance deadline to 24 hours from now
       final isRemittanceRequired = paymentMethod.requiresRemittance;
@@ -150,6 +159,7 @@ class DriverEarningsService {
         'payment_method': paymentMethod.toString().split('.').last,
         'platform_commission': platformCommission,
         'driver_net_earnings': driverNetEarnings,
+        'commission_rate_applied': platformCommissionRate, // Track which rate was used
         'is_remittance_required': isRemittanceRequired,
         'remittance_deadline': remittanceDeadline?.toIso8601String(),
       });

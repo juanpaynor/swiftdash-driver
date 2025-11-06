@@ -17,6 +17,7 @@ import '../services/ably_service.dart';
 import '../services/realtime_service.dart';
 import '../services/chat_service.dart';
 import '../services/driver_earnings_service.dart';
+import '../services/commission_service.dart';
 import '../widgets/pickup_confirmation_dialog.dart';
 import '../widgets/proof_of_delivery_dialog.dart';
 import '../widgets/multi_stop_widgets.dart';
@@ -88,9 +89,18 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
   List<DeliveryStop>? _stops;
   bool _isLoadingStops = false;
   
+  // 💰 COMMISSION: Dynamic commission rate
+  final CommissionService _commissionService = CommissionService();
+  double? _commissionRate;
+  String? _rateSource;
+  bool _isLoadingCommission = false;
+  
   @override
   void initState() {
     super.initState();
+    
+    // Load commission rate
+    _loadCommissionRate();
     
     // � PHASE 3: Initialize confetti controller
     _confettiController = ConfettiController(duration: const Duration(seconds: 3));
@@ -140,6 +150,91 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
     if (widget.delivery.isMultiStop) {
       _loadStops();
     }
+  }
+  
+  /// Load commission rate for this driver
+  Future<void> _loadCommissionRate() async {
+    if (_isLoadingCommission) return;
+    
+    setState(() {
+      _isLoadingCommission = true;
+    });
+    
+    try {
+      final driverId = widget.delivery.driverId;
+      if (driverId == null) {
+        throw Exception('Driver ID is null');
+      }
+      
+      final details = await _commissionService.getCommissionRate(driverId);
+      
+      setState(() {
+        _commissionRate = details.commissionRate;
+        _rateSource = details.rateSource;
+        _isLoadingCommission = false;
+      });
+
+      // Start polling for commission rate changes (every 5 minutes)
+      await _commissionService.startPollingForRateChanges(
+        driverId,
+        _handleCommissionRateChange,
+      );
+    } catch (e) {
+      print('Error loading commission rate: $e');
+      setState(() {
+        _commissionRate = 0.16; // Fallback to default
+        _rateSource = 'default';
+        _isLoadingCommission = false;
+      });
+    }
+  }
+
+  /// Handle real-time commission rate updates
+  void _handleCommissionRateChange(CommissionDetails newDetails) {
+    if (!mounted) return;
+
+    setState(() {
+      _commissionRate = newDetails.commissionRate;
+      _rateSource = newDetails.rateSource;
+    });
+
+    // Show notification to driver
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.info_outline, color: Colors.white),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                newDetails.rateSource == 'custom'
+                    ? 'Your commission rate updated to ${((1 - newDetails.commissionRate) * 100).toStringAsFixed(0)}%! 🎉'
+                    : 'Your commission rate reverted to default 16%',
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: newDetails.rateSource == 'custom' 
+            ? SwiftDashColors.successGreen 
+            : Colors.orange,
+        duration: const Duration(seconds: 5),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+
+    // Trigger haptic feedback
+    _triggerHapticFeedback(type: HapticFeedbackType.medium);
+  }
+  
+  /// Calculate driver earnings using commission rate
+  double get _driverEarnings {
+    if (_commissionRate == null) {
+      return widget.delivery.driverEarnings; // Fallback to hard-coded
+    }
+    
+    final totalPrice = widget.delivery.totalPrice;
+    final commission = totalPrice * _commissionRate!;
+    return totalPrice - commission;
   }
   
   @override
@@ -268,6 +363,10 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
     _controller.dispose();
     _confettiController.dispose();
     _earningsAnimationController.dispose();
+    
+    // Stop polling for commission rate changes
+    _commissionService.stopPollingForRateChanges();
+    
     super.dispose();
   }
   
@@ -897,31 +996,59 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
           ),
           child: Row(
             children: [
-              // Earnings (Driver's cut after 16% platform commission)
+              // Earnings (Driver's cut after platform commission)
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'YOUR EARNING',
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: Colors.grey[600],
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5,
-                      ),
+                    Row(
+                      children: [
+                        Text(
+                          'YOUR EARNING',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey[600],
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        if (_rateSource == 'custom' && _commissionRate != null) ...[
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: SwiftDashColors.successGreen.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '${((1 - _commissionRate!) * 100).toStringAsFixed(0)}%',
+                              style: const TextStyle(
+                                fontSize: 8,
+                                color: SwiftDashColors.successGreen,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 4),
+                    _isLoadingCommission
+                        ? const SizedBox(
+                            height: 24,
+                            width: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text(
+                            '₱${_driverEarnings.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: SwiftDashColors.successGreen,
+                            ),
+                          ),
                     Text(
-                      '₱${delivery.driverEarnings.toStringAsFixed(2)}',
-                      style: const TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: SwiftDashColors.successGreen,
-                      ),
-                    ),
-                    Text(
-                      'Total: ₱${delivery.totalPrice.toStringAsFixed(2)}',
+                      'Total: ₱${delivery.totalPrice.toStringAsFixed(2)}${_commissionRate != null ? " • ${(_commissionRate! * 100).toStringAsFixed(0)}% fee" : ""}',
                       style: TextStyle(
                         fontSize: 11,
                         color: Colors.grey[600],
@@ -1541,15 +1668,31 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
   
   /// Handle "Package Received" button tap
   Future<void> _handlePackageReceived() async {
+    print('📦 _handlePackageReceived called');
+    print('📦 Context mounted: ${context.mounted}');
+    print('📦 Delivery ID: ${widget.delivery.id}');
+    
     try {
+      if (!context.mounted) {
+        print('❌ Context not mounted, cannot show dialog');
+        return;
+      }
+      
+      print('📦 Showing pickup confirmation dialog...');
+      
       // Show pickup confirmation dialog with photo capture
       final photoUrl = await showDialog<String?>(
         context: context,
         barrierDismissible: false,
-        builder: (context) => PickupConfirmationDialog(
-          delivery: widget.delivery,
-        ),
+        builder: (context) {
+          print('📦 Dialog builder called');
+          return PickupConfirmationDialog(
+            delivery: widget.delivery,
+          );
+        },
       );
+      
+      print('📦 Dialog closed, photoUrl: $photoUrl');
       
       // If user cancelled, return early
       if (photoUrl == null) {
@@ -1637,7 +1780,34 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
   /// Handle "Arrived at Pickup" button tap
   /// Opens pickup modal immediately instead of requiring two separate taps
   Future<void> _handleArrivedButton(DeliveryStage stage) async {
+    print('🔘 _handleArrivedButton called for stage: ${stage.name}');
+    print('🔘 Current delivery status: ${widget.delivery.status}');
+    
     try {
+      // Show loading indicator
+      if (context.mounted) {
+        print('🔘 Showing loading indicator...');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Row(
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                ),
+                SizedBox(width: 12),
+                Text('Updating status...'),
+              ],
+            ),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      
       // 🔒 RACE CONDITION FIX: Check current status before updating
       final currentDelivery = await supabase
           .from('deliveries')
@@ -1666,7 +1836,7 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
       
       print('📍 Driver marking arrived: $nextStatus');
       
-      // 🚀 Send status update via Ably for real-time customer updates
+      // 🚀 STEP 1: Send status update via Ably for real-time customer updates
       await AblyService().publishStatusUpdate(
         deliveryId: widget.delivery.id,
         status: nextStatus.databaseValue,
@@ -1676,39 +1846,55 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
       );
       print('✅ Sent ${nextStatus.databaseValue} status via Ably');
       
-      // Update database in background (don't await - fire and forget)
-      supabase.from('deliveries').update({
+      // 🗄️ STEP 2: Update database and AWAIT to ensure it's saved before UI refresh
+      final updateResult = await supabase.from('deliveries').update({
         'status': nextStatus.databaseValue,
         'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', widget.delivery.id);
+      }).eq('id', widget.delivery.id).select();
+      print('✅ Database updated with status: ${nextStatus.databaseValue}');
+      print('📊 Update result: $updateResult');
       
       // ✅ IMPROVED UX: If arrived at pickup, immediately open pickup modal
       // No need to make driver tap twice!
       if (stage == DeliveryStage.headingToPickup) {
         print('🎯 Opening pickup confirmation modal immediately...');
-        await _handlePackageReceived();
+        
+        // Open the modal FIRST (before rebuilding the widget tree)
+        // This ensures the dialog context is valid
+        if (context.mounted) {
+          // Small delay to allow SnackBar to clear
+          await Future.delayed(const Duration(milliseconds: 300));
+          
+          print('📦 Showing pickup confirmation dialog...');
+          await _handlePackageReceived();
+          print('📦 Pickup confirmation dialog completed');
+        }
+        
+        // After modal is closed, notify parent to refresh UI
+        widget.onStatusChange?.call(stage);
       } else {
-        // For delivery arrival, just show success message
+        // For delivery arrival, show success and refresh UI
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('✅ Marked as arrived at delivery - tap to complete'),
+              content: Text('✅ Marked as arrived at delivery location'),
               backgroundColor: SwiftDashColors.successGreen,
-              duration: Duration(seconds: 3),
+              duration: Duration(seconds: 2),
             ),
           );
         }
         
-        // Notify parent to refresh
+        // Notify parent to refresh and update UI
         widget.onStatusChange?.call(stage);
       }
     } catch (e) {
       print('❌ Error updating arrival status: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('❌ Failed to update status'),
+          SnackBar(
+            content: Text('❌ Failed to update status: $e'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
           ),
         );
       }

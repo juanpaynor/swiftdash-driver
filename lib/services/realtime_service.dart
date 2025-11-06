@@ -429,18 +429,17 @@ class OptimizedRealtimeService {
       );
       print('✅ Published status to Ably: $status');
       
-      // 🗄️ STEP 2: Update database ONLY for final statuses
-      final isFinalStatus = ['delivered', 'cancelled', 'failed'].contains(status);
+      // 🗄️ STEP 2: ALWAYS update database for all statuses to keep driver app in sync
+      print('💾 Updating database: $status');
       
+      final updateData = {
+        'status': status,
+        'updated_at': DateTime.now().toIso8601String(),
+      };
+      
+      // Add completion timestamps for final statuses
+      final isFinalStatus = ['delivered', 'cancelled', 'failed'].contains(status);
       if (isFinalStatus) {
-        print('💾 Final status detected - updating database: $status');
-        
-        final updateData = {
-          'status': status,
-          'updated_at': DateTime.now().toIso8601String(),
-        };
-        
-        // Add completion timestamps for final statuses
         switch (status) {
           case 'delivered':
             updateData['delivered_at'] = DateTime.now().toIso8601String();
@@ -453,17 +452,15 @@ class OptimizedRealtimeService {
             updateData['failed_at'] = DateTime.now().toIso8601String();
             break;
         }
-        
-        // Persist to database
-        await _supabase
-            .from('deliveries')
-            .update(updateData)
-            .eq('id', deliveryId);
-        
-        print('✅ Database updated for final status: $status');
-      } else {
-        print('⏭️ Intermediate status - skipping database update (Ably-only): $status');
       }
+      
+      // Persist to database (ALWAYS, not just for final statuses)
+      await _supabase
+          .from('deliveries')
+          .update(updateData)
+          .eq('id', deliveryId);
+      
+      print('✅ Database updated: $status');
       
       // 📍 Store location ONLY for final statuses (avoid unnecessary DB writes)
       // Intermediate status locations are already broadcasted via Ably real-time

@@ -473,6 +473,9 @@ class NavigationService extends ChangeNotifier {
       _currentInstructionIndex++;
       _currentInstruction = _instructions[_currentInstructionIndex];
       
+      // 🆕 ISSUE FIX #2 & #3: Clear announcement history for new instruction
+      _announcementManager.clearAnnouncementsForNewInstruction();
+      
       // Send new instruction
       _instructionController.add(_currentInstruction!);
       
@@ -483,6 +486,11 @@ class NavigationService extends ChangeNotifier {
       ));
       
       debugPrint('📍 Advanced to instruction: ${_currentInstruction!.instruction}');
+      
+      // 🆕 ISSUE FIX #3: Immediately announce new instruction
+      if (_currentInstruction != null) {
+        _announcementManager.announceImmediateInstruction(_currentInstruction!);
+      }
     }
   }
 

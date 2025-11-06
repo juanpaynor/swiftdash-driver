@@ -100,8 +100,13 @@ class _NavigationInstructionPanelState extends State<NavigationInstructionPanel>
   }
 
   Widget _buildFullPanel() {
+    // 🆕 ISSUE FIX #4: Add proper top margin to avoid overlapping with app bar
+    final topPadding = MediaQuery.of(context).padding.top;
+    final appBarHeight = kToolbarHeight;
+    final totalTopSpace = topPadding + appBarHeight + 16; // Safe area + AppBar + spacing
+    
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      margin: EdgeInsets.fromLTRB(16, totalTopSpace, 16, 0),
       decoration: BoxDecoration(
         color: SwiftDashColors.white,
         borderRadius: BorderRadius.circular(16),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../models/driver.dart';
 import '../services/auth_service.dart';
 import '../services/driver_flow_service.dart';
+import '../services/delivery_offer_notification_service.dart';
 import '../core/supabase_config.dart';
 import '../screens/improved_edit_profile_screen.dart';
 import '../screens/navigation_settings_screen.dart';
@@ -218,6 +219,14 @@ class DriverDrawer extends StatelessWidget {
                     );
                   },
                 ),
+                _buildDrawerItem(
+                  icon: Icons.notification_add,
+                  title: '🧪 Test Notification',
+                  onTap: () async {
+                    Navigator.of(context).pop();
+                    await _testNotification(context);
+                  },
+                ),
                 const Divider(color: SwiftDashColors.lightBlue),
                 _buildDrawerItem(
                   icon: Icons.logout,
@@ -327,6 +336,80 @@ class DriverDrawer extends StatelessWidget {
           SnackBar(
             content: Text('Error accessing active delivery: $e'),
             backgroundColor: SwiftDashColors.dangerRed,
+          ),
+        );
+      }
+    }
+  }
+
+  /// Test notification functionality
+  static Future<void> _testNotification(BuildContext context) async {
+    try {
+      // Show loading indicator
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              ),
+              SizedBox(width: 12),
+              Text('Sending test notification...'),
+            ],
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      // Send test notification
+      await DeliveryOfferNotificationService.showOfferNotification(
+        deliveryId: 'TEST-${DateTime.now().millisecondsSinceEpoch}',
+        customerName: 'Test Customer',
+        totalPrice: 200.00,
+        driverEarnings: 125.50,
+        distance: 5.2,
+        pickupAddress: '123 Test Street, Manila City',
+        deliveryAddress: '456 Delivery Avenue, Makati City',
+      );
+
+      // Show success message
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Row(
+              children: [
+                Icon(Icons.check_circle, color: Colors.white),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '✅ Test notification sent! You should see it now (even if you minimize the app)',
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
+            action: SnackBarAction(
+              label: 'OK',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ Failed to send test notification: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
           ),
         );
       }
