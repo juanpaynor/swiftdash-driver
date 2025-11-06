@@ -572,13 +572,23 @@ class DriverFlowService {
     );
   }
 
-  /// Open maps navigation
+  /// Open maps navigation with proper deeplink handling
   void _openMapsNavigation(double lat, double lng) async {
-    final url = 'https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving';
     try {
-      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      // ✅ FIX: Try native Google Maps deeplink first, fallback to HTTPS
+      final nativeUri = Uri.parse('comgooglemaps://?daddr=$lat,$lng&directionsmode=driving');
+      
+      if (await canLaunchUrl(nativeUri)) {
+        await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
+        print('🗺️ Opened Google Maps via native deeplink');
+      } else {
+        // Fallback to HTTPS URL (works on all platforms)
+        final webUri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+        print('🗺️ Opened Google Maps via HTTPS link');
+      }
     } catch (e) {
-      print('❌ Could not open maps: $e');
+      print('❌ Could not open Google Maps: $e');
     }
   }
 

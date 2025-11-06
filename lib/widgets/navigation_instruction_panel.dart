@@ -100,10 +100,11 @@ class _NavigationInstructionPanelState extends State<NavigationInstructionPanel>
   }
 
   Widget _buildFullPanel() {
-    // 🆕 ISSUE FIX #4: Add proper top margin to avoid overlapping with app bar
+    // 🆕 ISSUE FIX #4: Add proper top margin to avoid overlapping with top ribbon
     final topPadding = MediaQuery.of(context).padding.top;
-    final appBarHeight = kToolbarHeight;
-    final totalTopSpace = topPadding + appBarHeight + 16; // Safe area + AppBar + spacing
+    final ribbonHeight = 56.0; // Top ribbon with menu/online status (12 padding + 32 button + 12 padding)
+    final additionalSpacing = 8.0; // Extra spacing below ribbon
+    final totalTopSpace = topPadding + ribbonHeight + additionalSpacing; // Safe area + Ribbon + spacing
     
     return Container(
       margin: EdgeInsets.fromLTRB(16, totalTopSpace, 16, 0),

@@ -1082,7 +1082,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       builder: (context) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         child: SingleChildScrollView(
-          child: Container(
+          child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1094,12 +1094,12 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFF6B35).withOpacity(0.1),
+                      color: SwiftDashColors.lightBlue.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Icon(
                       Icons.navigation,
-                      color: Color(0xFFFF6B35),
+                      color: SwiftDashColors.lightBlue,
                       size: 28,
                     ),
                   ),
@@ -1161,14 +1161,14 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
               Container(
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(
-                    colors: [Color(0xFFFF6B35), Color(0xFFFF8C42)],
+                    colors: [SwiftDashColors.lightBlue, SwiftDashColors.darkBlue],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFFFF6B35).withOpacity(0.3),
+                      color: SwiftDashColors.lightBlue.withOpacity(0.3),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
@@ -1349,63 +1349,90 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     );
   }
   
-  /// Launch navigation app
+  /// Launch navigation app with proper deeplink handling
   Future<void> _launchNavigation(String app, double lat, double lng) async {
-    Uri uri;
-    
-    if (app == 'google') {
-      // Use official Google Maps Directions API format
-      // Automatically uses user's current location as origin
-      uri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
-    } else if (app == 'waze') {
-      // Use native Waze protocol for better app integration
-      uri = Uri.parse('waze://ul?ll=$lat,$lng&navigate=yes');
-    } else {
-      return;
-    }
-    
     try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-        print('🗺️ Launched $app navigation');
+      bool launched = false;
+      
+      if (app == 'google') {
+        // ✅ FIX: Try multiple Google Maps URL schemes for better compatibility
         
-        // ✅ Send 'in_transit' status via Ably when driver starts navigation to destination
-        // Note: 'going_to_pickup' is sent automatically when driver accepts delivery
-        if (_driverFlow.hasActiveDelivery && _driverFlow.activeDelivery != null) {
-          final delivery = _driverFlow.activeDelivery!;
-          final currentStage = delivery.currentStage;
-          
-          // Only send in_transit when heading to destination (after package collection)
-          if (currentStage == DeliveryStage.headingToDelivery) {
-            debugPrint('📢 Sending in_transit status via Ably');
-            await AblyService().publishStatusUpdate(
-              deliveryId: delivery.id,
-              status: 'in_transit',
-              driverLocation: _currentPosition != null ? {
-                'latitude': _currentPosition!.latitude,
-                'longitude': _currentPosition!.longitude,
-              } : null,
-            );
+        // Option 1: Try native app deeplink first (comgooglemaps://)
+        final nativeUri = Uri.parse('comgooglemaps://?daddr=$lat,$lng&directionsmode=driving');
+        if (await canLaunchUrl(nativeUri)) {
+          await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
+          launched = true;
+          print('🗺️ Launched Google Maps via native deeplink');
+        } else {
+          // Option 2: Fallback to universal HTTPS link (works on all platforms)
+          final webUri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$lat,$lng&travelmode=driving');
+          if (await canLaunchUrl(webUri)) {
+            await launchUrl(webUri, mode: LaunchMode.externalApplication);
+            launched = true;
+            print('🗺️ Launched Google Maps via HTTPS link');
           }
         }
-      } else {
-        // Waze not installed - show helpful message
-        if (app == 'waze' && context.mounted) {
+      } else if (app == 'waze') {
+        // ✅ FIX: Proper Waze deeplink with fallback
+        
+        // Option 1: Try native Waze deeplink first
+        final wazeUri = Uri.parse('waze://?ll=$lat,$lng&navigate=yes');
+        if (await canLaunchUrl(wazeUri)) {
+          await launchUrl(wazeUri, mode: LaunchMode.externalApplication);
+          launched = true;
+          print('🗺️ Launched Waze via native deeplink');
+        } else {
+          // Option 2: Fallback to Waze web URL (redirects to app or shows install page)
+          final wazeWebUri = Uri.parse('https://waze.com/ul?ll=$lat,$lng&navigate=yes');
+          if (await canLaunchUrl(wazeWebUri)) {
+            await launchUrl(wazeWebUri, mode: LaunchMode.externalApplication);
+            launched = true;
+            print('🗺️ Launched Waze via web URL');
+          }
+        }
+        
+        // Show helpful message if Waze not available
+        if (!launched && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Waze is not installed. Please use Google Maps or install Waze.'),
+              content: Text('Waze is not installed. Please install Waze or use Google Maps.'),
               backgroundColor: SwiftDashColors.warningOrange,
+              duration: Duration(seconds: 3),
             ),
           );
         }
-        print('⚠️ $app not available');
+      }
+      
+      // ✅ Send 'in_transit' status via Ably when driver starts navigation to destination
+      if (launched && _driverFlow.hasActiveDelivery && _driverFlow.activeDelivery != null) {
+        final delivery = _driverFlow.activeDelivery!;
+        final currentStage = delivery.currentStage;
+        
+        // Only send in_transit when heading to destination (after package collection)
+        if (currentStage == DeliveryStage.headingToDelivery) {
+          debugPrint('📢 Sending in_transit status via Ably');
+          await AblyService().publishStatusUpdate(
+            deliveryId: delivery.id,
+            status: 'in_transit',
+            driverLocation: _currentPosition != null ? {
+              'latitude': _currentPosition!.latitude,
+              'longitude': _currentPosition!.longitude,
+            } : null,
+          );
+        }
+      }
+      
+      if (!launched) {
+        print('⚠️ $app navigation could not be launched');
       }
     } catch (e) {
+      print('❌ Error launching $app navigation: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('❌ Error launching $app: $e'),
+            content: Text('Unable to open $app. Please try again or use another navigation app.'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
           ),
         );
       }

@@ -478,6 +478,100 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
                               ),
                             ),
                             
+                            // Sender notes (pickup instructions)
+                            if (widget.delivery.pickupInstructions != null && 
+                                widget.delivery.pickupInstructions!.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 16),
+                                child: Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: SwiftDashColors.lightBlue.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: SwiftDashColors.lightBlue.withOpacity(0.3),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.notes_outlined,
+                                            color: SwiftDashColors.lightBlue,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            'Sender Notes',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              color: SwiftDashColors.darkBlue,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        widget.delivery.pickupInstructions!,
+                                        style: TextStyle(
+                                          color: SwiftDashColors.textGrey,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            
+                            // Delivery instructions (if any)
+                            if (widget.delivery.deliveryInstructions != null && 
+                                widget.delivery.deliveryInstructions!.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 16),
+                                child: Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: SwiftDashColors.dangerRed.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: SwiftDashColors.dangerRed.withOpacity(0.3),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.info_outline,
+                                            color: SwiftDashColors.dangerRed,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            'Delivery Instructions',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              color: SwiftDashColors.darkBlue,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        widget.delivery.deliveryInstructions!,
+                                        style: TextStyle(
+                                          color: SwiftDashColors.textGrey,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            
                             const SizedBox(height: 20),
                             
                             // Order info

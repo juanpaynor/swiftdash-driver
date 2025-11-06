@@ -680,9 +680,18 @@ class _DriverDashboardState extends State<DriverDashboard> {
                               ),
                               TextButton(
                                 onPressed: () async {
-                                  final googleUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
-                                  if (await canLaunchUrl(googleUri)) {
-                                    await launchUrl(googleUri, mode: LaunchMode.externalApplication);
+                                  // ✅ FIX: Try native Google Maps deeplink first, fallback to HTTPS
+                                  try {
+                                    final nativeUri = Uri.parse('comgooglemaps://?q=$lat,$lng');
+                                    if (await canLaunchUrl(nativeUri)) {
+                                      await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
+                                    } else {
+                                      // Fallback to HTTPS search URL
+                                      final webUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+                                      await launchUrl(webUri, mode: LaunchMode.externalApplication);
+                                    }
+                                  } catch (e) {
+                                    print('❌ Error opening Google Maps: $e');
                                   }
                                 },
                                 child: const Text('Open in Maps'),

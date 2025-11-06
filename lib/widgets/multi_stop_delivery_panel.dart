@@ -167,15 +167,31 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
   }
   
   Future<void> _navigateToStop(DeliveryStop stop) async {
-    final url = 'https://www.google.com/maps/dir/?api=1&destination=${stop.latitude},${stop.longitude}&travelmode=driving';
-    final uri = Uri.parse(url);
-    
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
+    try {
+      // ✅ FIX: Try native Google Maps deeplink first, fallback to HTTPS
+      final nativeUri = Uri.parse('comgooglemaps://?daddr=${stop.latitude},${stop.longitude}&directionsmode=driving');
+      
+      if (await canLaunchUrl(nativeUri)) {
+        await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
+        print('🗺️ Navigating to stop via Google Maps native deeplink');
+      } else {
+        // Fallback to HTTPS URL (works on all platforms)
+        final webUri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${stop.latitude},${stop.longitude}&travelmode=driving');
+        if (await canLaunchUrl(webUri)) {
+          await launchUrl(webUri, mode: LaunchMode.externalApplication);
+          print('🗺️ Navigating to stop via Google Maps HTTPS link');
+        } else {
+          throw Exception('Could not launch Google Maps');
+        }
+      }
+    } catch (e) {
+      print('❌ Error navigating to stop: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open navigation app')),
+          const SnackBar(
+            content: Text('Could not open navigation app. Please ensure Google Maps is installed.'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     }
