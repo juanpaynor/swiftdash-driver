@@ -429,38 +429,57 @@ class OptimizedRealtimeService {
       );
       print('✅ Published status to Ably: $status');
       
-      // 🗄️ STEP 2: ALWAYS update database for all statuses to keep driver app in sync
-      print('💾 Updating database: $status');
+      // 🗄️ STEP 2: Update database ONLY for statuses that exist in DB constraint
+      // Database accepts: driver_assigned, going_to_pickup, package_collected, going_to_destination, delivered, cancelled, failed
+      // Database REJECTS: at_pickup, at_destination, in_transit (these are Ably-only)
+      final validDbStatuses = [
+        'driver_assigned',
+        'going_to_pickup', 
+        'pickup_arrived',     // ✅ Valid in database
+        'package_collected',
+        'going_to_destination',
+        'delivered',
+        'cancelled',
+        'failed'
+      ];
       
-      final updateData = {
-        'status': status,
-        'updated_at': DateTime.now().toIso8601String(),
-      };
-      
-      // Add completion timestamps for final statuses
+      // Check if this is a final status (moved outside if block)
       final isFinalStatus = ['delivered', 'cancelled', 'failed'].contains(status);
-      if (isFinalStatus) {
-        switch (status) {
-          case 'delivered':
-            updateData['delivered_at'] = DateTime.now().toIso8601String();
-            updateData['completed_at'] = DateTime.now().toIso8601String();
-            break;
-          case 'cancelled':
-            updateData['cancelled_at'] = DateTime.now().toIso8601String();
-            break;
-          case 'failed':
-            updateData['failed_at'] = DateTime.now().toIso8601String();
-            break;
+      
+      if (validDbStatuses.contains(status)) {
+        print('💾 Updating database: $status');
+        
+        final updateData = {
+          'status': status,
+          'updated_at': DateTime.now().toIso8601String(),
+        };
+        
+        // Add completion timestamps for final statuses
+        if (isFinalStatus) {
+          switch (status) {
+            case 'delivered':
+              updateData['delivered_at'] = DateTime.now().toIso8601String();
+              updateData['completed_at'] = DateTime.now().toIso8601String();
+              break;
+            case 'cancelled':
+              updateData['cancelled_at'] = DateTime.now().toIso8601String();
+              break;
+            case 'failed':
+              updateData['failed_at'] = DateTime.now().toIso8601String();
+              break;
+          }
         }
+        
+        // Persist to database
+        await _supabase
+            .from('deliveries')
+            .update(updateData)
+            .eq('id', deliveryId);
+        
+        print('✅ Database updated: $status');
+      } else {
+        print('⚠️ Skipping database update for Ably-only status: $status');
       }
-      
-      // Persist to database (ALWAYS, not just for final statuses)
-      await _supabase
-          .from('deliveries')
-          .update(updateData)
-          .eq('id', deliveryId);
-      
-      print('✅ Database updated: $status');
       
       // 📍 Store location ONLY for final statuses (avoid unnecessary DB writes)
       // Intermediate status locations are already broadcasted via Ably real-time

@@ -1700,26 +1700,36 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   
   /// Setup location tracking for navigation updates
   void _setupNavigationLocationTracking() {
-    // Use a simple timer to periodically update navigation with current position
-    // This integrates with the existing location updates in the main map screen
-    Timer.periodic(const Duration(seconds: 2), (timer) {
-      if (!_isNavigating) {
-        timer.cancel();
-        return;
+    // ✅ FIX: Start continuous location stream to update _currentPosition
+    final locationStream = geo.Geolocator.getPositionStream(
+      locationSettings: const geo.LocationSettings(
+        accuracy: geo.LocationAccuracy.high,
+        distanceFilter: 5, // Update every 5 meters
+      ),
+    );
+    
+    // Listen to location updates and update current position
+    locationStream.listen((position) {
+      if (!_isNavigating) return;
+      
+      // Update current position
+      _currentPosition = position;
+      debugPrint('📍 Location updated: ${position.latitude}, ${position.longitude}, heading: ${position.heading}');
+      
+      // Update navigation service
+      _navigationService.updateLocation(position);
+      
+      // 🎥 Update camera to follow driver during navigation (only if locked)
+      if (_isNavigationCameraLocked) {
+        _updateNavigationCamera(position);
       }
       
-      if (_currentPosition != null) {
-        _navigationService.updateLocation(_currentPosition!);
-        
-        // 🎥 Update camera to follow driver during navigation (only if locked)
-        if (_isNavigationCameraLocked) {
-          _updateNavigationCamera(_currentPosition!);
-        }
-        
-        // ✅ Option 4: Dual polylines with smooth transitions (traveled gray + remaining blue)
-        _updateDualPolylinesSmooth(_currentPosition!);
-      }
+      // ✅ Update dual polylines with smooth transitions (traveled gray + remaining blue)
+      _updateDualPolylinesSmooth(position);
     });
+    
+    // OLD Timer-based approach (REMOVED - was not getting fresh location)
+    // Timer.periodic(const Duration(seconds: 2), (timer) { ... });
     
     // Listen to navigation events
     _navigationService.eventStream.listen((event) {
@@ -3101,9 +3111,13 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   /// 🎨 Option 4: Update dual polylines with smooth transitions
   /// Shows traveled path (gray) and remaining path (blue) with smooth updates
   Future<void> _updateDualPolylinesSmooth(geo.Position driverLocation) async {
-    if (_routePolylineManager == null || 
-        _originalRouteCoordinates == null ||
-        _originalRouteCoordinates!.isEmpty) {
+    if (_routePolylineManager == null) {
+      debugPrint('⚠️ Polyline update skipped: _routePolylineManager is null');
+      return;
+    }
+    
+    if (_originalRouteCoordinates == null || _originalRouteCoordinates!.isEmpty) {
+      debugPrint('⚠️ Polyline update skipped: _originalRouteCoordinates is null or empty');
       return;
     }
     
@@ -3111,6 +3125,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       // Initialize traveled route manager if needed
       if (_traveledRouteManager == null && _mapboxMap != null) {
         _traveledRouteManager = await _mapboxMap!.annotations.createPolylineAnnotationManager();
+        debugPrint('✅ Traveled route manager created');
       }
       
       // Find the closest point on the route
@@ -3282,7 +3297,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
           ),
         ),
         image: pickupMarkerImage,
-        iconSize: 0.8,
+        iconSize: 1.0, // ✅ FIX: Increased from 0.8 for better visibility
       );
       
       // 🎯 Delivery marker (red pin with "D")
@@ -3294,7 +3309,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
           ),
         ),
         image: dropoffMarkerImage,
-        iconSize: 0.8,
+        iconSize: 1.0, // ✅ FIX: Increased from 0.8 for better visibility
       );
       
       await _pickupMarkerManager!.create(pickupOptions);
@@ -3531,7 +3546,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
   /// Create a modern driver puck image with directional arrow
   /// This replaces the old custom chevron with a cleaner, more professional look
   Future<Uint8List> _createDriverPuckImage() async {
-    const size = 100.0; // Slightly larger for better visibility
+    const size = 140.0; // ✅ FIX: Increased from 100 to 140 for better visibility
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, size, size));
     final centerX = size / 2;
@@ -3541,13 +3556,13 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     final borderPaint = Paint()
       ..color = Colors.white
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(Offset(centerX, centerY), 22, borderPaint);
+    canvas.drawCircle(Offset(centerX, centerY), 32, borderPaint); // Increased from 22
     
     // Draw inner circle (blue background)
     final circlePaint = Paint()
       ..color = const Color(0xFF0EA5E9) // Cyan-blue
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(Offset(centerX, centerY), 18, circlePaint);
+    canvas.drawCircle(Offset(centerX, centerY), 28, circlePaint); // Increased from 18
     
     // Draw directional arrow (white, pointing up - bearing will rotate)
     final arrowPaint = Paint()
@@ -3555,14 +3570,14 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       ..style = PaintingStyle.fill;
     
     final arrowPath = Path();
-    // Sharp arrow pointing upward
-    arrowPath.moveTo(centerX, centerY - 12); // Top point
-    arrowPath.lineTo(centerX + 8, centerY - 2); // Right upper
-    arrowPath.lineTo(centerX + 4, centerY - 2); // Right inner
-    arrowPath.lineTo(centerX + 4, centerY + 10); // Right bottom
-    arrowPath.lineTo(centerX - 4, centerY + 10); // Left bottom
-    arrowPath.lineTo(centerX - 4, centerY - 2); // Left inner
-    arrowPath.lineTo(centerX - 8, centerY - 2); // Left upper
+    // Sharp arrow pointing upward (scaled up)
+    arrowPath.moveTo(centerX, centerY - 18); // Top point (was -12)
+    arrowPath.lineTo(centerX + 12, centerY - 3); // Right upper (was +8, -2)
+    arrowPath.lineTo(centerX + 6, centerY - 3); // Right inner (was +4, -2)
+    arrowPath.lineTo(centerX + 6, centerY + 15); // Right bottom (was +4, +10)
+    arrowPath.lineTo(centerX - 6, centerY + 15); // Left bottom (was -4, +10)
+    arrowPath.lineTo(centerX - 6, centerY - 3); // Left inner (was -4, -2)
+    arrowPath.lineTo(centerX - 12, centerY - 3); // Left upper (was -8, -2)
     arrowPath.close();
     
     canvas.drawPath(arrowPath, arrowPaint);
