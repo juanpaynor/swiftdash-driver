@@ -199,7 +199,9 @@ class Delivery {
     if (statusString == null) return DeliveryStatus.pending;
     
 
-    // Database constraint allows: 'pickup_arrived', 'at_destination', 'in_transit' (per schema Nov 11, 2025)
+    // Database constraint allows: pending, driver_offered, driver_assigned, going_to_pickup, pickup_arrived,
+    // package_collected, going_to_destination, at_destination, in_transit, delivered, cancelled, failed
+    // ❌ NOT allowed: 'completed' (per actual schema Nov 11, 2025)
     final statusMap = {
       'pending': DeliveryStatus.pending,
       'driver_offered': DeliveryStatus.driverOffered,
@@ -461,11 +463,10 @@ enum DeliveryStatus {
 
 extension DeliveryStatusExtension on DeliveryStatus {
   /// Get database-compatible snake_case value for status updates
-  /// 🔥 CRITICAL FIX Nov 11, 2025: Database constraint is very restrictive
-  /// ✅ Per schema: constraint allows ONLY: pickup_arrived, at_destination, in_transit  
-  /// ❌ All other values (delivered, completed, pending, etc.) are REJECTED
-  /// 
-  /// 🚨 WORKAROUND: Map final statuses to 'at_destination' until constraint is updated
+  /// ✅ FIXED Nov 11, 2025: Actual constraint from schema allows ALL workflow statuses
+  /// Allowed: pending, driver_offered, driver_assigned, going_to_pickup, pickup_arrived,
+  /// package_collected, going_to_destination, at_destination, in_transit, delivered, cancelled, failed
+  /// ❌ NOT allowed: 'completed' (RPC was incorrectly using this)
   String get databaseValue {
     switch (this) {
       // Early workflow statuses - may work if constraint allows them
@@ -482,19 +483,19 @@ extension DeliveryStatusExtension on DeliveryStatus {
       case DeliveryStatus.pickupArrived:
         return 'pickup_arrived';  // ✅ CONFIRMED: Allowed by constraint
       case DeliveryStatus.packageCollected:
-        return 'in_transit';  // ✅ Map to allowed value - package collected means in transit
+        return 'package_collected';  // ✅ Package collected status
       case DeliveryStatus.goingToDestination:
         return 'in_transit';  // ✅ CONFIRMED: Allowed by constraint
       case DeliveryStatus.atDestination:
         return 'at_destination';  // ✅ CONFIRMED: Allowed by constraint
         
-      // Final statuses - CRITICAL WORKAROUND to prevent constraint violations
+      // Final statuses - ALL allowed by constraint
       case DeliveryStatus.delivered:
-        return 'at_destination';  // � WORKAROUND: Constraint rejects 'delivered'/'completed', use allowed value
+        return 'delivered';  // ✅ CORRECT: Constraint allows this (not 'completed')
       case DeliveryStatus.cancelled:
-        return 'at_destination';  // 🔄 WORKAROUND: Constraint rejects 'cancelled', use allowed value
+        return 'cancelled';  // ✅ CORRECT: Constraint allows this
       case DeliveryStatus.failed:
-        return 'at_destination';  // 🔄 WORKAROUND: Constraint rejects 'failed', use allowed value
+        return 'failed';  // ✅ CORRECT: Constraint allows this
     }
   }
   

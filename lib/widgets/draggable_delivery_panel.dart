@@ -2483,22 +2483,43 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
         // Don't block delivery completion if earnings recording fails
       }
       
-      // ⭐ Use fleet-safe helper function (Added Nov 3, 2025)
-      // This handles: delivery completion, driver status reset, and fleet vehicle reset
-      await supabase.rpc(
-        'complete_delivery_safe',
-        params: {
-          'p_delivery_id': widget.delivery.id,
-          'p_driver_id': widget.delivery.driverId!,
-        },
-      );
+      // ⭐ FIXED Nov 11, 2025: Use 'delivered' not 'completed' (RPC was using wrong status)
+      // Constraint allows: pending, driver_offered, driver_assigned, going_to_pickup, pickup_arrived, 
+      // package_collected, going_to_destination, at_destination, in_transit, delivered, cancelled, failed
+      await supabase.from('deliveries').update({
+        'status': 'delivered',  // ✅ CORRECT: Constraint allows 'delivered' (not 'completed')
+        'completed_at': DateTime.now().toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+        'proof_photo_url': podResult['photoUrl'],
+        'recipient_name': podResult['recipientName'],
+        'signature_data': podResult['signatureData'],
+        'delivery_notes': podResult['notes'],
+      }).eq('id', widget.delivery.id);
+      
+      // Reset driver status to available
+      if (widget.delivery.driverId != null) {
+        await supabase.from('driver_profiles').update({
+          'current_delivery_id': null,
+          'is_available': true,
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', widget.delivery.driverId!);
+      }
+      
+      // Reset fleet vehicle if assigned
+      if (widget.delivery.fleetVehicleId != null) {
+        await supabase.from('fleet_vehicles').update({
+          'current_delivery_id': null,
+          'is_available': true,
+          'updated_at': DateTime.now().toIso8601String(),
+        }).eq('id', widget.delivery.fleetVehicleId!);
+      }
       
       print('✅ Delivery marked as complete');
       
       // ✅ Send real-time status update via Ably (non-blocking)
       AblyService().publishStatusUpdate(
         deliveryId: widget.delivery.id,
-        status: DeliveryStatus.delivered.databaseValue,
+        status: 'delivered',  // ✅ Send 'delivered' to customer app
         notes: 'Package has been delivered successfully',
       ).catchError((e) => debugPrint('⚠️ Ably publish failed: $e'));
       debugPrint('📢 Sent delivered status via Ably (non-blocking)');
