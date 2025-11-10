@@ -2498,20 +2498,20 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
         // 'delivery_notes': podResult['notes'],
       }).eq('id', widget.delivery.id);
       
-      // Reset driver status to available
+      // Reset driver status to available (only update fields that exist in schema)
       if (widget.delivery.driverId != null) {
         await supabase.from('driver_profiles').update({
-          'current_delivery_id': null,
           'is_available': true,
+          'current_status': 'online',  // ✅ This column exists in schema
           'updated_at': DateTime.now().toIso8601String(),
         }).eq('id', widget.delivery.driverId!);
       }
       
-      // Reset fleet vehicle if assigned
+      // Reset fleet vehicle if assigned (check if this table/column exists)
       if (widget.delivery.fleetVehicleId != null) {
-        await supabase.from('fleet_vehicles').update({
-          'current_delivery_id': null,
+        await supabase.from('business_fleet').update({
           'is_available': true,
+          'current_status': 'idle',  // Assuming this column exists
           'updated_at': DateTime.now().toIso8601String(),
         }).eq('id', widget.delivery.fleetVehicleId!);
       }
