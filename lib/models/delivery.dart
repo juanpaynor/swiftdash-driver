@@ -199,7 +199,7 @@ class Delivery {
     if (statusString == null) return DeliveryStatus.pending;
     
 
-    // Database uses snake_case: 'at_pickup', 'package_collected', 'in_transit'
+    // Database constraint allows: 'pickup_arrived', 'at_destination', 'in_transit' (per schema Nov 11, 2025)
     final statusMap = {
       'pending': DeliveryStatus.pending,
       'driver_offered': DeliveryStatus.driverOffered,
@@ -208,19 +208,19 @@ class Delivery {
       'driverAssigned': DeliveryStatus.driverAssigned,
       'going_to_pickup': DeliveryStatus.goingToPickup,
       'goingToPickup': DeliveryStatus.goingToPickup,
-      'at_pickup': DeliveryStatus.pickupArrived,       // ✅ CORRECT per customer app (Oct 29, 2025)
-      'pickup_arrived': DeliveryStatus.pickupArrived,  // ❌ LEGACY - still supported for backwards compatibility
+      'at_pickup': DeliveryStatus.pickupArrived,       // ❌ LEGACY - database constraint rejects 'at_pickup', expects 'pickup_arrived'
+      'pickup_arrived': DeliveryStatus.pickupArrived,  // ✅ CORRECT - database constraint accepts this value
       'pickupArrived': DeliveryStatus.pickupArrived,
       'atPickup': DeliveryStatus.pickupArrived,
-      'package_collected': DeliveryStatus.packageCollected,  // ✅ CORRECT per customer app
+      'package_collected': DeliveryStatus.packageCollected,  // ✅ CORRECT per database constraint
       'packageCollected': DeliveryStatus.packageCollected,
       'picked_up': DeliveryStatus.packageCollected,    // ❌ LEGACY - map to correct enum
       'pickedUp': DeliveryStatus.packageCollected,
       'going_to_destination': DeliveryStatus.goingToDestination,
       'goingToDestination': DeliveryStatus.goingToDestination,
-      'in_transit': DeliveryStatus.goingToDestination, // ✅ CORRECT per customer app
+      'in_transit': DeliveryStatus.goingToDestination, // ✅ CORRECT per database constraint  
       'inTransit': DeliveryStatus.goingToDestination,
-      'at_destination': DeliveryStatus.atDestination,
+      'at_destination': DeliveryStatus.atDestination,  // ✅ CORRECT per database constraint
       'atDestination': DeliveryStatus.atDestination,
       'delivered': DeliveryStatus.delivered,
       'cancelled': DeliveryStatus.cancelled,
@@ -461,8 +461,8 @@ enum DeliveryStatus {
 
 extension DeliveryStatusExtension on DeliveryStatus {
   /// Get database-compatible snake_case value for status updates
-  /// ✅ CONFIRMED with Customer App Team on Oct 21, 2025
-  /// See: RESPONSE_TO_DRIVER_APP_TEAM.md
+  /// ✅ CONFIRMED with Database Schema on Nov 11, 2025
+  /// Database constraint allows: pickup_arrived, at_destination, in_transit
   String get databaseValue {
     switch (this) {
       case DeliveryStatus.pending:
@@ -472,15 +472,15 @@ extension DeliveryStatusExtension on DeliveryStatus {
       case DeliveryStatus.driverAssigned:
         return 'driver_assigned';
       case DeliveryStatus.goingToPickup:
-        return 'going_to_pickup';  // Optional status
+        return 'going_to_pickup';  // ✅ Allowed by database constraint
       case DeliveryStatus.pickupArrived:
-        return 'at_pickup';  // ✅ FIXED: Changed from 'pickup_arrived' to match customer app
+        return 'pickup_arrived';  // ✅ CORRECT: Database constraint allows this (not 'at_pickup')
       case DeliveryStatus.packageCollected:
-        return 'package_collected';  // ✅ CORRECT per customer app (NOT 'picked_up')
+        return 'package_collected';  // ✅ CORRECT: Database constraint allows this
       case DeliveryStatus.goingToDestination:
-        return 'in_transit';  // ✅ CORRECT per customer app
+        return 'in_transit';  // ✅ CORRECT: Database constraint allows this
       case DeliveryStatus.atDestination:
-        return 'at_destination';  // ✅ Customer app expects this value
+        return 'at_destination';  // ✅ CORRECT: Database constraint allows this
       case DeliveryStatus.delivered:
         return 'delivered';
       case DeliveryStatus.cancelled:
