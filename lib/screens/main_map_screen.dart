@@ -1157,114 +1157,19 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
               
               const SizedBox(height: 24),
               
-              // 🌟 RECOMMENDED: SwiftDash Navigation (Large Card)
-              Container(
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [SwiftDashColors.lightBlue, SwiftDashColors.darkBlue],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: SwiftDashColors.lightBlue.withOpacity(0.3),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () async {
-                      Navigator.pop(context);
-                      await _showBetaWarningIfNeeded(lat, lng, delivery);
-                    },
-                    borderRadius: BorderRadius.circular(16),
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Icon(
-                              Icons.navigation,
-                              color: Colors.white,
-                              size: 32,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          const Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Text(
-                                      'SwiftDash Navigation',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    SizedBox(width: 8),
-                                    Icon(Icons.star, color: Colors.white, size: 16),
-                                  ],
-                                ),
-                                SizedBox(height: 4),
-                                Text(
-                                  'Recommended • Turn-by-turn • Voice guidance',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const Icon(
-                            Icons.arrow_forward_ios,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+              // Navigation Options
+              const Text(
+                'Choose Navigation App',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
                 ),
               ),
               
               const SizedBox(height: 16),
               
-              // Divider with "OR" text
-              Row(
-                children: [
-                  Expanded(child: Divider(color: Colors.grey[300])),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      'OR USE EXTERNAL APP',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.grey[600],
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ),
-                  Expanded(child: Divider(color: Colors.grey[300])),
-                ],
-              ),
-              
-              const SizedBox(height: 16),
-              
-              // External Navigation Options (Compact)
+              // Navigation Options
               Row(
                 children: [
                   Expanded(
@@ -2147,30 +2052,41 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
     
     // ✅ Clear ALL route polylines and markers (including traveled path)
     print('🧹 Clearing all polylines and markers after delivery completion');
-    if (_routePolylineManager != null) {
-      await _routePolylineManager!.deleteAll();
-      _routePolylineManager = null;
-      _currentRouteAnnotation = null;
-    }
-    if (_traveledRouteManager != null) {
-      await _traveledRouteManager!.deleteAll();
-      _traveledRouteManager = null;
-      _traveledRouteAnnotation = null;
-    }
-    if (_pickupMarkerManager != null) {
-      await _pickupMarkerManager!.deleteAll();
-      _pickupMarkerManager = null;
-    }
-    if (_dropoffMarkerManager != null) {
-      await _dropoffMarkerManager!.deleteAll();
-      _dropoffMarkerManager = null;
+    try {
+      if (_routePolylineManager != null) {
+        await _routePolylineManager!.deleteAll();
+        _routePolylineManager = null;
+        _currentRouteAnnotation = null;
+      }
+      if (_traveledRouteManager != null) {
+        await _traveledRouteManager!.deleteAll();
+        _traveledRouteManager = null;
+        _traveledRouteAnnotation = null;
+      }
+      if (_pickupMarkerManager != null) {
+        await _pickupMarkerManager!.deleteAll();
+        _pickupMarkerManager = null;
+      }
+      if (_dropoffMarkerManager != null) {
+        await _dropoffMarkerManager!.deleteAll();
+        _dropoffMarkerManager = null;
+      }
+      
+      // Clear route coordinates
+      _originalRouteCoordinates = null;
+      _routeData = null;
+      
+      print('✅ All polylines and markers cleared after delivery completion');
+    } catch (e) {
+      print('⚠️ Error clearing map resources: $e');
     }
     
-    // Clear route coordinates
-    _originalRouteCoordinates = null;
-    _routeData = null;
-    
-    print('✅ All polylines and markers cleared after delivery completion');
+    // Force UI update after clearing map resources
+    if (mounted) {
+      setState(() {
+        // UI will rebuild without polylines/markers
+      });
+    }
     
     // Navigate to completion screen
     await Navigator.of(context).push(

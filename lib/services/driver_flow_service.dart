@@ -157,39 +157,36 @@ class DriverFlowService {
       // Reload driver profile to get updated status with location
       _currentDriver = await _authService.getCurrentDriverProfile();
 
-      // 🔋 CRITICAL: Check battery optimization before going online
-      // Only show warning once per session to avoid being annoying
-      try {
-        final hasExemption = await BatteryOptimizationHelper.checkAndRequestOnGoingOnline(context);
-        if (!hasExemption) {
-          print('⚠️ Battery optimization not disabled');
-          // Show subtle warning instead of blocking dialog
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: const Text(
-                  '⚠️ Battery optimization enabled - you may miss delivery offers when idle',
-                  style: TextStyle(fontSize: 13),
-                ),
-                backgroundColor: Colors.orange,
-                duration: const Duration(seconds: 5),
-                action: SnackBarAction(
-                  label: 'Fix',
-                  textColor: Colors.white,
-                  onPressed: () {
-                    BatteryOptimizationHelper.requestBatteryOptimizationExemption(context);
-                  },
-                ),
-              ),
-            );
-          }
-        } else {
-          print('✅ Battery optimization disabled - background notifications will work reliably');
-        }
-      } catch (e) {
-        print('⚠️ Failed to check battery optimization: $e');
-        // Continue anyway
-      }
+      // 🔋 Battery optimization check disabled per user request
+      // try {
+      //   final hasExemption = await BatteryOptimizationHelper.checkAndRequestOnGoingOnline(context);
+      //   if (!hasExemption) {
+      //     print('⚠️ Battery optimization not disabled');
+      //     if (context.mounted) {
+      //       ScaffoldMessenger.of(context).showSnackBar(
+      //         SnackBar(
+      //           content: const Text(
+      //             '⚠️ Battery optimization enabled - you may miss delivery offers when idle',
+      //             style: TextStyle(fontSize: 13),
+      //           ),
+      //           backgroundColor: Colors.orange,
+      //           duration: const Duration(seconds: 5),
+      //           action: SnackBarAction(
+      //             label: 'Fix',
+      //             textColor: Colors.white,
+      //             onPressed: () {
+      //               BatteryOptimizationHelper.requestBatteryOptimizationExemption(context);
+      //             },
+      //           ),
+      //         ),
+      //       );
+      //     }
+      //   } else {
+      //     print('✅ Battery optimization disabled - background notifications will work reliably');
+      //   }
+      // } catch (e) {
+      //   print('⚠️ Failed to check battery optimization: $e');
+      // }
 
       // �🚨 CRITICAL FIX: Initialize realtime subscriptions to receive delivery offers
       try {
