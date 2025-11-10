@@ -243,6 +243,16 @@ class OptimizedRealtimeService {
           // ✅ FIX: Don't start location here - DriverFlowService handles it
           // Location tracking started by DriverFlowService.acceptDeliveryOffer()
           print('📍 Skipping location broadcast - handled by DriverFlowService');
+          
+          // ✅ Business Dispatch Detection (Nov 9, 2025)
+          // If this is a new business dispatch assignment, show offer modal
+          if (delivery.isNewBusinessAssignment) {
+            print('🏢 *** NEW BUSINESS DISPATCH ASSIGNMENT DETECTED ***');
+            print('🏢 Business ID: ${delivery.businessId}');
+            print('🏢 Driver Source: ${delivery.driverSource}');
+            print('🏢 Triggering offer modal for business delivery: ${delivery.id}');
+            _handleNewOffer(delivery);
+          }
           break;
         case DeliveryStatus.delivered:
           // Stop location broadcast for completed delivery

@@ -57,6 +57,17 @@ class DriverFlowService {
       if (activeDeliveries.isNotEmpty) {
         _activeDelivery = activeDeliveries.first;
         
+        // ✅ Business Dispatch Detection (Nov 9, 2025)
+        // Check if this is a new business dispatch assignment
+        if (_activeDelivery!.isNewBusinessAssignment) {
+          print('🏢 *** BUSINESS DISPATCH DETECTED ON APP STARTUP ***');
+          print('🏢 Business ID: ${_activeDelivery!.businessId}');
+          print('🏢 Driver Source: ${_activeDelivery!.driverSource}');
+          print('🏢 Assignment Type: ${_activeDelivery!.assignmentType}');
+          print('🏢 Delivery instructions: ${_activeDelivery!.deliveryInstructions ?? "none"}');
+          print('🏢 Pickup instructions: ${_activeDelivery!.pickupInstructions ?? "none"}');
+        }
+        
         // Resume location tracking if delivery is in progress
         // ✅ FIX: Include all active statuses including pickup_arrived and at_destination
         // 🔒 CRITICAL: Only start if NOT already tracking to prevent infinite restart loop

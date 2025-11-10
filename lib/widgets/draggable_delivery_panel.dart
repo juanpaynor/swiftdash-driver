@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:confetti/confetti.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:math' as math;
 import '../models/delivery.dart';
 import '../models/delivery_stop.dart';
@@ -15,13 +14,11 @@ import '../services/driver_location_service.dart';
 import '../services/multi_stop_service.dart';
 import '../services/ably_service.dart';
 import '../services/realtime_service.dart';
-import '../services/chat_service.dart';
 import '../services/driver_earnings_service.dart';
 import '../services/commission_service.dart';
 import '../widgets/pickup_confirmation_dialog.dart';
 import '../widgets/proof_of_delivery_dialog.dart';
 import '../widgets/multi_stop_widgets.dart';
-import '../screens/delivery_chat_screen.dart';
 
 /// Panel display mode
 enum PanelMode {
@@ -906,6 +903,91 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
               ),
             ],
           ),
+          
+          // ✅ Delivery Instructions Section (Nov 9, 2025)
+          if (delivery.pickupInstructions != null && delivery.pickupInstructions!.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.blue.withOpacity(0.2)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, size: 18, color: Colors.blue[700]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Pickup Instructions',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          delivery.pickupInstructions!,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          
+          if (delivery.deliveryInstructions != null && delivery.deliveryInstructions!.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withOpacity(0.2)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.assignment_outlined, size: 18, color: Colors.orange[700]),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Delivery Instructions',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.orange[700],
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          delivery.deliveryInstructions!,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -977,6 +1059,36 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ✅ Business Dispatch Badge (Nov 9, 2025)
+        if (delivery.isBusinessDelivery)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Colors.blue[700]!, Colors.blue[500]!],
+              ),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.blue[800]!, width: 2),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.business, color: Colors.white, size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  'Business Dispatch',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        
         // 📊 PROGRESS BAR - Visual stage indicator
         _buildProgressIndicator(currentStage),
         
@@ -1393,15 +1505,15 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
           child: _buildQuickActionButton(
             icon: Icons.phone,
             label: 'Call',
-            onTap: _callCustomer,
+            onTap: _showCallContactModal,
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: _buildQuickActionButton(
-            icon: Icons.chat_bubble_outline,
-            label: 'Chat',
-            onTap: _openChat,
+            icon: Icons.message,
+            label: 'Message',
+            onTap: _showMessageContactModal,
           ),
         ),
         const SizedBox(width: 8),
@@ -1834,7 +1946,11 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
           ? DeliveryStatus.pickupArrived
           : DeliveryStatus.atDestination;
       
-      print('📍 Driver marking arrived: $nextStatus');
+      print('📍 ========== ARRIVAL BUTTON DEBUG ==========');
+      print('📍 Current status: ${widget.delivery.status} (${widget.delivery.status.databaseValue})');
+      print('📍 Current stage: ${stage.name}');
+      print('📍 Next status: $nextStatus (${nextStatus.databaseValue})');
+      print('📍 =========================================');
       
       // 🚀 STEP 1: Send status update via Ably for real-time customer updates
       await AblyService().publishStatusUpdate(
@@ -1901,8 +2017,116 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
     }
   }
   
-  Future<void> _callCustomer() async {
-    final phone = widget.delivery.deliveryContactPhone;
+  /// Show contact selection modal for calling
+  Future<void> _showCallContactModal() async {
+    final stage = widget.delivery.currentStage;
+    
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            
+            // Title
+            const Text(
+              'Who would you like to call?',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            // Pickup Contact Option
+            ListTile(
+              leading: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.person, color: Colors.green),
+              ),
+              title: Text(
+                widget.delivery.pickupContactName,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                '${widget.delivery.pickupContactPhone}\nPickup Contact',
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              ),
+              trailing: Icon(
+                Icons.phone,
+                color: stage == DeliveryStage.headingToPickup 
+                  ? Colors.green 
+                  : Colors.grey,
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _callNumber(widget.delivery.pickupContactPhone);
+              },
+            ),
+            
+            const Divider(height: 32),
+            
+            // Delivery Contact Option
+            ListTile(
+              leading: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.location_on, color: Colors.orange),
+              ),
+              title: Text(
+                widget.delivery.deliveryContactName,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                '${widget.delivery.deliveryContactPhone}\nDelivery Contact',
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              ),
+              trailing: Icon(
+                Icons.phone,
+                color: stage == DeliveryStage.headingToDelivery 
+                  ? Colors.orange 
+                  : Colors.grey,
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _callNumber(widget.delivery.deliveryContactPhone);
+              },
+            ),
+            
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  /// Call a phone number
+  Future<void> _callNumber(String phone) async {
     if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -1928,51 +2152,141 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
     }
   }
 
-  /// Open chat screen
-  Future<void> _openChat() async {
-    try {
-      // 🔧 Ensure ChatService is initialized
-      if (!ChatService().isInitialized) {
-        debugPrint('⚠️ ChatService not initialized - initializing now...');
-        final ablyKey = dotenv.env['ABLY_CLIENT_KEY'];
-        if (ablyKey == null || ablyKey.isEmpty) {
-          throw Exception('Ably key not found in .env');
-        }
-        await ChatService().initialize(ablyKey);
-      }
-
-      // Query driver_profiles table using 'id' column (not 'user_id')
-      final driver = await supabase
-          .from('driver_profiles')
-          .select('id, first_name, last_name')
-          .eq('id', supabase.auth.currentUser!.id)
-          .single();
-
-      final String driverName = '${driver['first_name']} ${driver['last_name']}';
-
-      if (context.mounted) {
-        await Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (context) => DeliveryChatScreen(
-              delivery: widget.delivery,
-              driverId: driver['id'],
-              driverName: driverName,
+  /// Show contact selection modal for messaging
+  Future<void> _showMessageContactModal() async {
+    final stage = widget.delivery.currentStage;
+    
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error opening chat: $e');
+            
+            // Title
+            const Text(
+              'Who would you like to message?',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            // Pickup Contact Option
+            ListTile(
+              leading: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.person, color: Colors.green),
+              ),
+              title: Text(
+                widget.delivery.pickupContactName,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                '${widget.delivery.pickupContactPhone}\nPickup Contact',
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              ),
+              trailing: Icon(
+                Icons.message,
+                color: stage == DeliveryStage.headingToPickup 
+                  ? Colors.green 
+                  : Colors.grey,
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _sendSMS(widget.delivery.pickupContactPhone);
+              },
+            ),
+            
+            const Divider(height: 32),
+            
+            // Delivery Contact Option
+            ListTile(
+              leading: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.location_on, color: Colors.orange),
+              ),
+              title: Text(
+                widget.delivery.deliveryContactName,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              subtitle: Text(
+                '${widget.delivery.deliveryContactPhone}\nDelivery Contact',
+                style: TextStyle(color: Colors.grey[600], fontSize: 13),
+              ),
+              trailing: Icon(
+                Icons.message,
+                color: stage == DeliveryStage.headingToDelivery 
+                  ? Colors.orange 
+                  : Colors.grey,
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _sendSMS(widget.delivery.deliveryContactPhone);
+              },
+            ),
+            
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  /// Send SMS to a phone number
+  Future<void> _sendSMS(String phone) async {
+    if (phone.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('❌ No phone number available'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
+    final uri = Uri.parse('sms:$phone');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to open chat: ${e.toString()}'),
+          const SnackBar(
+            content: Text('❌ Could not launch messaging app'),
             backgroundColor: Colors.red,
           ),
         );
       }
     }
   }
+  
   
   /// Show cancel job confirmation dialog
   /// TODO: Hook this up to a cancel button when needed
@@ -2425,11 +2739,6 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
     // Clean up Realtime channels (Supabase)
     OptimizedRealtimeService().cleanupDeliveryChannels(deliveryId).catchError((e) {
       debugPrint('⚠️ Error cleaning realtime channels: $e');
-    });
-    
-    // Clean up Chat service (Ably chat channels)
-    ChatService().cleanupDeliveryChat(deliveryId).catchError((e) {
-      debugPrint('⚠️ Error cleaning chat service: $e');
     });
     
     // Clean up Ably tracking channel

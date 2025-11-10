@@ -1794,7 +1794,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       // Mark as programmatic update
       _isProgrammaticCameraUpdate = true;
       
-      // Set initial camera position with 3D tilt for navigation
+      // Set initial camera position with 3D tilt for navigation - following from behind
       await _mapboxMap!.flyTo(
         CameraOptions(
           center: Point(
@@ -1803,9 +1803,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
               _currentPosition!.latitude,
             ),
           ),
-          zoom: 17.0, // Closer zoom for navigation
-          bearing: _currentPosition!.heading, // Heading-up mode
-          pitch: 55.0, // 3D tilt for better road perspective
+          zoom: 18.5, // ✅ Closer zoom for better navigation view
+          bearing: _currentPosition!.heading, // Heading-up mode (follows driving direction)
+          pitch: 60.0, // ✅ Increased 3D tilt for behind-the-driver perspective
         ),
         MapAnimationOptions(duration: 1000, startDelay: 0),
       );
@@ -1814,7 +1814,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       await Future.delayed(const Duration(milliseconds: 1100));
       _isProgrammaticCameraUpdate = false;
       
-      debugPrint('✅ Navigation camera mode enabled with auto-follow');
+      debugPrint('✅ Navigation camera mode enabled with auto-follow (behind perspective)');
     } catch (e) {
       debugPrint('❌ Error enabling navigation camera: $e');
       _isProgrammaticCameraUpdate = false;
@@ -1831,7 +1831,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       // Mark as programmatic update to prevent listener from unlocking camera
       _isProgrammaticCameraUpdate = true;
       
-      // Smoothly animate camera to follow driver with heading rotation
+      // Smoothly animate camera to follow driver with heading rotation - behind perspective
       await _mapboxMap!.easeTo(
         CameraOptions(
           center: Point(
@@ -1840,9 +1840,9 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
               location.latitude,
             ),
           ),
-          zoom: 17.0, // Keep consistent navigation zoom
-          bearing: location.heading, // Rotate map to match driving direction
-          pitch: 55.0, // Maintain 3D perspective
+          zoom: 18.5, // ✅ Consistent closer zoom for navigation
+          bearing: location.heading, // ✅ Rotate map to match driving direction (behind view)
+          pitch: 60.0, // ✅ Maintain increased 3D perspective for behind-the-driver view
         ),
         MapAnimationOptions(duration: 800, startDelay: 0),
       );
@@ -2145,19 +2145,32 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       await _disableNavigationCameraMode();
     }
     
-    // Clear route and markers
+    // ✅ Clear ALL route polylines and markers (including traveled path)
+    print('🧹 Clearing all polylines and markers after delivery completion');
     if (_routePolylineManager != null) {
       await _routePolylineManager!.deleteAll();
+      _routePolylineManager = null;
+      _currentRouteAnnotation = null;
     }
     if (_traveledRouteManager != null) {
       await _traveledRouteManager!.deleteAll();
+      _traveledRouteManager = null;
+      _traveledRouteAnnotation = null;
     }
     if (_pickupMarkerManager != null) {
       await _pickupMarkerManager!.deleteAll();
+      _pickupMarkerManager = null;
     }
     if (_dropoffMarkerManager != null) {
       await _dropoffMarkerManager!.deleteAll();
+      _dropoffMarkerManager = null;
     }
+    
+    // Clear route coordinates
+    _originalRouteCoordinates = null;
+    _routeData = null;
+    
+    print('✅ All polylines and markers cleared after delivery completion');
     
     // Navigate to completion screen
     await Navigator.of(context).push(
@@ -3068,7 +3081,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
       final polylineOptions = PolylineAnnotationOptions(
         geometry: lineString,
         lineColor: const Color(0xFF00D9FF).value, // ✅ Bright cyan - highly visible on dark maps
-        lineWidth: 6.0, // Thicker for better visibility
+        lineWidth: 8.0, // ✅ Increased width for better visibility during navigation
         lineOpacity: 1.0, // Full opacity
       );
       
@@ -3181,7 +3194,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
           final traveledOptions = PolylineAnnotationOptions(
             geometry: LineString(coordinates: traveledCoordinates),
             lineColor: Colors.grey.withOpacity(0.4).value, // Subtle gray
-            lineWidth: 4.0,
+            lineWidth: 6.0, // ✅ Increased width for traveled path
             lineOpacity: 0.5,
           );
           _traveledRouteAnnotation = await _traveledRouteManager!.create(traveledOptions);
@@ -3198,7 +3211,7 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
           final remainingOptions = PolylineAnnotationOptions(
             geometry: LineString(coordinates: remainingCoordinates),
             lineColor: const Color(0xFF0EA5E9).value, // Vibrant cyan-blue
-            lineWidth: 6.0,
+            lineWidth: 8.0, // ✅ Increased width for remaining route
             lineOpacity: 1.0,
           );
           _currentRouteAnnotation = await _routePolylineManager!.create(remainingOptions);
@@ -3483,13 +3496,22 @@ class _MainMapScreenState extends State<MainMapScreen> with TickerProviderStateM
         await _clearOfferVisualization();
       }
       
-      // Clear map visualization (polylines, markers, INCLUDING traveled route)
+      // ✅ Clear ALL map visualization (polylines, markers, INCLUDING traveled route)
+      print('🧹 Clearing all polylines and markers after cancellation');
       await _clearDeliveryRoute();
       
       // Clear traveled route polyline (for dual polyline navigation)
       if (_traveledRouteManager != null) {
         await _traveledRouteManager!.deleteAll();
+        _traveledRouteManager = null;
+        _traveledRouteAnnotation = null;
       }
+      
+      // Clear route coordinates
+      _originalRouteCoordinates = null;
+      _routeData = null;
+      
+      print('✅ All polylines and markers cleared after cancellation');
       
       // 🗺️ Switch back to default map style
       await _switchToDefaultMapStyle();

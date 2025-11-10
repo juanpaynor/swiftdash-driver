@@ -138,10 +138,39 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
     
     // Fallback calculation based on distance (₱50 base + ₱15/km)
     if (widget.delivery.distanceKm != null) {
-      return 50.0 + (widget.delivery.distanceKm! * 15.0);
+      double basePrice = 50.0;
+      double distancePrice = widget.delivery.distanceKm! * 15.0;
+      
+      // Add multi-stop surcharge if applicable
+      if (widget.delivery.isMultiStop && widget.delivery.totalStops > 1) {
+        double additionalStopCharge = (widget.delivery.totalStops - 1) * 20.0; // ₱20 per additional stop
+        return basePrice + distancePrice + additionalStopCharge;
+      }
+      
+      return basePrice + distancePrice;
     }
     
     return 50.0; // Minimum fare
+  }
+  
+  // ✅ Multi-Stop Pricing Breakdown (Nov 10, 2025)
+  Map<String, double> _getMultiStopPricingBreakdown() {
+    if (!widget.delivery.isMultiStop) {
+      return {};
+    }
+    
+    double basePrice = 50.0;
+    double distancePrice = (widget.delivery.distanceKm ?? 0) * 15.0;
+    double additionalStops = (widget.delivery.totalStops - 1).toDouble();
+    double additionalStopCharge = additionalStops * 20.0;
+    
+    return {
+      'base': basePrice,
+      'distance': distancePrice,
+      'additionalStops': additionalStops,
+      'additionalStopCharge': additionalStopCharge,
+      'total': basePrice + distancePrice + additionalStopCharge,
+    };
   }
   
   void _onSlideUpdate(double progress) {
@@ -304,6 +333,66 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
               ),
             ),
             
+            // ✅ Business Dispatch Badge (Nov 9, 2025)
+            if (widget.delivery.isBusinessDelivery) 
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.blue[700]!, Colors.blue[500]!],
+                  ),
+                  border: Border(
+                    bottom: BorderSide(color: Colors.blue[800]!, width: 2),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.business, color: Colors.white, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Business Dispatch Assignment',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            
+            // ✅ Multi-Stop Indicator Badge (Nov 10, 2025)
+            if (widget.delivery.isMultiStop) 
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.orange[700]!, Colors.orange[500]!],
+                  ),
+                  border: Border(
+                    bottom: BorderSide(color: Colors.orange[800]!, width: 2),
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.route, color: Colors.white, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Multi-Stop Delivery (${widget.delivery.totalStops} stops)',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            
             // Main content area
             Expanded(
               child: Container(
@@ -388,6 +477,57 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
                       ),
                     ),
                     
+                    // ✅ Multi-Stop Pricing Breakdown (Nov 10, 2025)
+                    if (widget.delivery.isMultiStop)
+                      Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Colors.orange.withOpacity(0.3),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.receipt_outlined,
+                                  color: Colors.orange,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Multi-Stop Pricing',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: SwiftDashColors.darkBlue,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Builder(builder: (context) {
+                              final breakdown = _getMultiStopPricingBreakdown();
+                              if (breakdown.isEmpty) return const SizedBox();
+                              
+                              return Column(
+                                children: [
+                                  _buildPricingRow('Base fare', breakdown['base']!),
+                                  _buildPricingRow('Distance (${_formatDistance()})', breakdown['distance']!),
+                                  _buildPricingRow('${breakdown['additionalStops']!.toInt()} extra stops', breakdown['additionalStopCharge']!),
+                                  const Divider(height: 16),
+                                  _buildPricingRow('Total', breakdown['total']!, isTotal: true),
+                                ],
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                    
                     // Route preview map with route polygon
                     if (!_loadingRoute)
                       SizedBox(
@@ -428,15 +568,26 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
                             
                             const SizedBox(height: 16),
                             
-                            // Delivery location
-                            _buildLocationCard(
-                              icon: Icons.location_on,
-                              iconColor: SwiftDashColors.dangerRed,
-                              title: 'Delivery',
-                              address: widget.delivery.deliveryAddress,
-                              contact: widget.delivery.deliveryContactName,
-                              phone: widget.delivery.deliveryContactPhone,
-                            ),
+                            // Delivery location(s)
+                            if (widget.delivery.isMultiStop)
+                              _buildLocationCard(
+                                icon: Icons.route,
+                                iconColor: Colors.orange,
+                                title: 'Multiple Destinations',
+                                address: '${widget.delivery.totalStops - 1} delivery stops',
+                                contact: 'Various recipients',
+                                phone: '',
+                                isMultiStop: true,
+                              )
+                            else
+                              _buildLocationCard(
+                                icon: Icons.location_on,
+                                iconColor: SwiftDashColors.dangerRed,
+                                title: 'Delivery',
+                                address: widget.delivery.deliveryAddress,
+                                contact: widget.delivery.deliveryContactName,
+                                phone: widget.delivery.deliveryContactPhone,
+                              ),
                             
                             const SizedBox(height: 20),
                             
@@ -477,6 +628,111 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
                                 ],
                               ),
                             ),
+                            
+                            // ✅ Multi-Stop Route Information (Nov 10, 2025)
+                            if (widget.delivery.isMultiStop)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 16),
+                                child: Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: Colors.orange.withOpacity(0.3),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.route,
+                                            color: Colors.orange,
+                                            size: 20,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            'Multi-Stop Route',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              color: SwiftDashColors.darkBlue,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      // Route overview
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.radio_button_checked,
+                                            color: SwiftDashColors.successGreen,
+                                            size: 16,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            '1. Pickup: ${widget.delivery.pickupAddress.length > 40 ? widget.delivery.pickupAddress.substring(0, 40) + '...' : widget.delivery.pickupAddress}',
+                                            style: TextStyle(
+                                              color: SwiftDashColors.textGrey,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.location_on,
+                                            color: Colors.orange,
+                                            size: 16,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            '2-${widget.delivery.totalStops}. ${widget.delivery.totalStops - 1} delivery stops',
+                                            style: TextStyle(
+                                              color: SwiftDashColors.textGrey,
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 12),
+                                      // Route optimization notice
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.orange.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.auto_awesome,
+                                              color: Colors.orange,
+                                              size: 16,
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                'Route will be optimized for efficiency',
+                                                style: TextStyle(
+                                                  color: Colors.orange[700],
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             
                             // Sender notes (pickup instructions)
                             if (widget.delivery.pickupInstructions != null && 
@@ -623,6 +879,7 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
     required String address,
     required String contact,
     required String phone,
+    bool isMultiStop = false,
   }) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -667,37 +924,58 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
                   ),
                 ),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.person_outline,
-                      size: 16,
-                      color: SwiftDashColors.textGrey,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      contact,
-                      style: TextStyle(
-                        color: SwiftDashColors.textGrey,
-                        fontSize: 14,
+                // Show contact info for single deliveries, route info for multi-stop
+                if (isMultiStop)
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.alt_route,
+                        size: 16,
+                        color: Colors.orange,
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Icon(
-                      Icons.phone_outlined,
-                      size: 16,
-                      color: SwiftDashColors.textGrey,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      phone,
-                      style: TextStyle(
-                        color: SwiftDashColors.textGrey,
-                        fontSize: 14,
+                      const SizedBox(width: 4),
+                      Text(
+                        'Optimized route order',
+                        style: TextStyle(
+                          color: Colors.orange,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  )
+                else
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.person_outline,
+                        size: 16,
+                        color: SwiftDashColors.textGrey,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        contact,
+                        style: TextStyle(
+                          color: SwiftDashColors.textGrey,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Icon(
+                        Icons.phone_outlined,
+                        size: 16,
+                        color: SwiftDashColors.textGrey,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        phone,
+                        style: TextStyle(
+                          color: SwiftDashColors.textGrey,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),
@@ -739,6 +1017,34 @@ class _ImprovedDeliveryOfferModalState extends State<ImprovedDeliveryOfferModal>
             style: const TextStyle(
               fontWeight: FontWeight.w600,
               color: SwiftDashColors.darkBlue,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // ✅ Pricing Row Helper for Multi-Stop Breakdown (Nov 10, 2025)
+  Widget _buildPricingRow(String label, double amount, {bool isTotal = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: isTotal ? 14 : 13,
+              fontWeight: isTotal ? FontWeight.w600 : FontWeight.normal,
+              color: isTotal ? SwiftDashColors.darkBlue : SwiftDashColors.textGrey,
+            ),
+          ),
+          Text(
+            '₱${amount.toStringAsFixed(2)}',
+            style: TextStyle(
+              fontSize: isTotal ? 14 : 13,
+              fontWeight: isTotal ? FontWeight.w600 : FontWeight.w500,
+              color: isTotal ? SwiftDashColors.darkBlue : SwiftDashColors.textGrey,
             ),
           ),
         ],

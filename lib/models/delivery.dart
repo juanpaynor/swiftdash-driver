@@ -179,11 +179,26 @@ class Delivery {
     return '${minutes}m';
   }
   
+  // ✅ Business Delivery Detection (Nov 9, 2025)
+  // Identifies deliveries assigned via business dispatch system
+  bool get isBusinessDelivery => businessId != null;
+  
+  bool get isBusinessDispatch => driverSource == 'business_dispatch';
+  
+  bool get isManualAssignment => assignmentType == 'manual';
+  
+  bool get isAutoAssignment => assignmentType == 'auto';
+  
+  // Check if this is a newly assigned business delivery (driver hasn't accepted yet)
+  bool get isNewBusinessAssignment => 
+      isBusinessDispatch && 
+      status == DeliveryStatus.driverAssigned &&
+      driverId != null;
+  
   static DeliveryStatus _parseDeliveryStatus(String? statusString) {
     if (statusString == null) return DeliveryStatus.pending;
     
-    // ✅ CONFIRMED with Customer App Team on Oct 21, 2025
-    // See: RESPONSE_TO_DRIVER_APP_TEAM.md for official status values
+
     // Database uses snake_case: 'at_pickup', 'package_collected', 'in_transit'
     final statusMap = {
       'pending': DeliveryStatus.pending,
