@@ -68,7 +68,7 @@ class DeliveryService {
   Future<void> updateDeliveryStatus(String deliveryId, DeliveryStatus status) async {
     try {
       final updateData = {
-        'status': status.toString().split('.').last,
+        'status': status.databaseValue, // ✅ Use database-compatible value instead of enum name
         'updated_at': DateTime.now().toIso8601String(),
       };
       
