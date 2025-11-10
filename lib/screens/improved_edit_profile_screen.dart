@@ -83,7 +83,7 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
       final supabase = Supabase.instance.client;
       final response = await supabase
           .from('driver_profiles')
-          .select('*, business:businesses!managed_by_business_id(name)')
+          .select('*, business:business_fleet!managed_by_business_id(name)')
           .eq('user_id', user.id)
           .single();
 
@@ -134,7 +134,7 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
     try {
       final supabase = Supabase.instance.client;
       final response = await supabase
-          .from('businesses')
+          .from('business_fleet')
           .select('id, name')
           .eq('invitation_code', code)
           .maybeSingle();
@@ -292,7 +292,7 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
       if (_invitationCodeController.text.trim().isNotEmpty && _validatedBusinessName != null) {
         // Fetch business ID
         final businessResponse = await supabase
-            .from('businesses')
+            .from('business_fleet')
             .select('id')
             .eq('invitation_code', _invitationCodeController.text.trim())
             .single();
