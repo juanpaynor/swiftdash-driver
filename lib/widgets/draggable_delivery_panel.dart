@@ -2486,14 +2486,16 @@ class _DraggableDeliveryPanelState extends State<DraggableDeliveryPanel> with Ti
       // ⭐ FIXED Nov 11, 2025: Use 'delivered' not 'completed' (RPC was using wrong status)
       // Constraint allows: pending, driver_offered, driver_assigned, going_to_pickup, pickup_arrived, 
       // package_collected, going_to_destination, at_destination, in_transit, delivered, cancelled, failed
+      // ⚠️ Note: proof_photo_url, recipient_name, signature_data, delivery_notes columns need to be added to DB
       await supabase.from('deliveries').update({
         'status': 'delivered',  // ✅ CORRECT: Constraint allows 'delivered' (not 'completed')
         'completed_at': DateTime.now().toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
-        'proof_photo_url': podResult['photoUrl'],
-        'recipient_name': podResult['recipientName'],
-        'signature_data': podResult['signatureData'],
-        'delivery_notes': podResult['notes'],
+        // TODO: Add these columns to DB schema first:
+        // 'proof_photo_url': podResult['photoUrl'],
+        // 'recipient_name': podResult['recipientName'],
+        // 'signature_data': podResult['signatureData'],
+        // 'delivery_notes': podResult['notes'],
       }).eq('id', widget.delivery.id);
       
       // Reset driver status to available
