@@ -7,19 +7,18 @@ import '../services/document_upload_service.dart';
 /// Dialog for confirming package pickup with proof photo
 class PickupConfirmationDialog extends StatefulWidget {
   final Delivery delivery;
-  
-  const PickupConfirmationDialog({
-    Key? key,
-    required this.delivery,
-  }) : super(key: key);
+
+  const PickupConfirmationDialog({Key? key, required this.delivery})
+    : super(key: key);
 
   @override
-  State<PickupConfirmationDialog> createState() => _PickupConfirmationDialogState();
+  State<PickupConfirmationDialog> createState() =>
+      _PickupConfirmationDialogState();
 }
 
 class _PickupConfirmationDialogState extends State<PickupConfirmationDialog> {
   final DocumentUploadService _uploadService = DocumentUploadService();
-  
+
   File? _pickupPhoto;
   bool _isUploading = false;
   String? _errorMessage;
@@ -41,12 +40,13 @@ class _PickupConfirmationDialogState extends State<PickupConfirmationDialog> {
   }
 
   Future<void> _confirmPickup() async {
-    if (_pickupPhoto == null) {
-      setState(() {
-        _errorMessage = 'Please capture a pickup proof photo';
-      });
-      return;
-    }
+    // 🔧 DEV MODE: Photo optional for faster testing
+    // if (_pickupPhoto == null) {
+    //   setState(() {
+    //     _errorMessage = 'Please capture a pickup proof photo';
+    //   });
+    //   return;
+    // }
 
     setState(() {
       _isUploading = true;
@@ -54,23 +54,32 @@ class _PickupConfirmationDialogState extends State<PickupConfirmationDialog> {
     });
 
     try {
-      print('📤 Starting pickup photo upload...');
-      
-      // Upload photo to Supabase with timeout
-      final photoUrl = await _uploadService.uploadPickupProof(
-        _pickupPhoto!,
-        widget.delivery.id,
-      ).timeout(
-        const Duration(seconds: 30),
-        onTimeout: () {
-          throw Exception('Upload timed out. Please check your internet connection.');
-        },
-      );
+      // 🔧 DEV MODE: Skip photo upload if no photo captured
+      String? photoUrl;
+      if (_pickupPhoto != null) {
+        print('📤 Starting pickup photo upload...');
 
-      print('✅ Upload completed: $photoUrl');
+        // Upload photo to Supabase with timeout
+        photoUrl = await _uploadService
+            .uploadPickupProof(_pickupPhoto!, widget.delivery.id)
+            .timeout(
+              const Duration(seconds: 30),
+              onTimeout: () {
+                throw Exception(
+                  'Upload timed out. Please check your internet connection.',
+                );
+              },
+            );
 
-      if (photoUrl == null) {
-        throw Exception('Failed to upload photo - no URL returned');
+        print('✅ Upload completed: $photoUrl');
+
+        if (photoUrl == null) {
+          throw Exception('Failed to upload photo - no URL returned');
+        }
+      } else {
+        print('⚠️ DEV MODE: Skipping photo upload - no photo captured');
+        photoUrl =
+            'https://placeholder.dev/no-pickup-photo'; // Placeholder for dev
       }
 
       // Return the photo URL to parent
@@ -92,9 +101,7 @@ class _PickupConfirmationDialogState extends State<PickupConfirmationDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height * 0.85,
@@ -106,184 +113,40 @@ class _PickupConfirmationDialogState extends State<PickupConfirmationDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-            // Header
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.green.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    Icons.inventory_2,
-                    color: Colors.green,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Confirm Package Pickup',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Take a photo of the package',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            
-            const SizedBox(height: 24),
-            
-            // Delivery Info
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildInfoRow('Order ID', widget.delivery.id.substring(0, 8).toUpperCase()),
-                  const SizedBox(height: 8),
-                  _buildInfoRow('Pickup', widget.delivery.pickupAddress),
-                  const SizedBox(height: 8),
-                  _buildInfoRow('Package', widget.delivery.packageDescription),
-                ],
-              ),
-            ),
-            
-            const SizedBox(height: 24),
-            
-            // Photo Section
-            if (_pickupPhoto != null) ...[
-              Container(
-                height: 200,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.green,
-                    width: 2,
-                  ),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: Image.file(
-                    _pickupPhoto!,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-            
-            // Capture Photo Button
-            OutlinedButton.icon(
-              onPressed: _isUploading ? null : _capturePickupPhoto,
-              icon: Icon(
-                _pickupPhoto != null ? Icons.refresh : Icons.camera_alt,
-                size: 20,
-              ),
-              label: Text(
-                _pickupPhoto != null ? 'Retake Photo' : 'Capture Photo',
-                style: const TextStyle(fontSize: 16),
-              ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.blue.shade800,
-                side: BorderSide(
-                  color: Colors.blue.shade800,
-                  width: 2,
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-            
-            // Error Message
-            if (_errorMessage != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade200),
-                ),
-                child: Row(
+                // Header
+                Row(
                   children: [
-                    Icon(Icons.error_outline, color: Colors.red.shade700, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _errorMessage!,
-                        style: TextStyle(
-                          color: Colors.red.shade700,
-                          fontSize: 13,
-                        ),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.inventory_2,
+                        color: Colors.green,
+                        size: 28,
                       ),
                     ),
-                  ],
-                ),
-              ),
-            ],
-            
-            // Upload Progress Indicator
-            if (_isUploading) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.blue.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.blue.shade200),
-                ),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.blue.shade700),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 16),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'Uploading photo...',
+                          const Text(
+                            'Confirm Package Pickup',
                             style: TextStyle(
-                              color: Colors.blue.shade700,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black87,
                             ),
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Please wait, do not close this dialog',
+                            'Take a photo of the package',
                             style: TextStyle(
-                              color: Colors.blue.shade600,
-                              fontSize: 12,
+                              fontSize: 14,
+                              color: Colors.grey[600],
                             ),
                           ),
                         ],
@@ -291,68 +154,218 @@ class _PickupConfirmationDialogState extends State<PickupConfirmationDialog> {
                     ),
                   ],
                 ),
-              ),
-            ],
-            
-            const SizedBox(height: 24),
-            
-            // Action Buttons
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: _isUploading ? null : () => Navigator.of(context).pop(),
-                    child: const Text('Cancel'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.grey[700],
-                      side: BorderSide(color: Colors.grey[300]!),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+
+                const SizedBox(height: 24),
+
+                // Delivery Info
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildInfoRow(
+                        'Order ID',
+                        widget.delivery.id.substring(0, 8).toUpperCase(),
                       ),
+                      const SizedBox(height: 8),
+                      _buildInfoRow('Pickup', widget.delivery.pickupAddress),
+                      const SizedBox(height: 8),
+                      _buildInfoRow(
+                        'Package',
+                        widget.delivery.packageDescription,
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                // Photo Section
+                if (_pickupPhoto != null) ...[
+                  Container(
+                    height: 200,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green, width: 2),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.file(_pickupPhoto!, fit: BoxFit.cover),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+
+                // Capture Photo Button
+                OutlinedButton.icon(
+                  onPressed: _isUploading ? null : _capturePickupPhoto,
+                  icon: Icon(
+                    _pickupPhoto != null ? Icons.refresh : Icons.camera_alt,
+                    size: 20,
+                  ),
+                  label: Text(
+                    _pickupPhoto != null ? 'Retake Photo' : 'Capture Photo',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.blue.shade800,
+                    side: BorderSide(color: Colors.blue.shade800, width: 2),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 2,
-                  child: ElevatedButton.icon(
-                    onPressed: (_isUploading || _pickupPhoto == null) 
-                        ? null 
-                        : _confirmPickup,
-                    icon: _isUploading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                            ),
-                          )
-                        : const Icon(Icons.check_circle, size: 20),
-                    label: Text(
-                      _isUploading ? 'Uploading...' : 'Package Received',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+
+                // Error Message
+                if (_errorMessage != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.red.shade200),
                     ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 0,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          color: Colors.red.shade700,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _errorMessage!,
+                            style: TextStyle(
+                              color: Colors.red.shade700,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                ],
+
+                // Upload Progress Indicator
+                if (_isUploading) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.blue.shade700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Uploading photo...',
+                                style: TextStyle(
+                                  color: Colors.blue.shade700,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Please wait, do not close this dialog',
+                                style: TextStyle(
+                                  color: Colors.blue.shade600,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 24),
+
+                // Action Buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _isUploading
+                            ? null
+                            : () => Navigator.of(context).pop(),
+                        child: const Text('Cancel'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.grey[700],
+                          side: BorderSide(color: Colors.grey[300]!),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 2,
+                      child: ElevatedButton.icon(
+                        // 🔧 DEV MODE: Allow submission without photo
+                        onPressed: _isUploading ? null : _confirmPickup,
+                        icon: _isUploading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white,
+                                  ),
+                                ),
+                              )
+                            : const Icon(Icons.check_circle, size: 20),
+                        label: Text(
+                          _isUploading ? 'Uploading...' : 'Package Received',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 0,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
-        ),
-        ),
+          ),
         ),
       ),
     );
@@ -376,10 +389,7 @@ class _PickupConfirmationDialogState extends State<PickupConfirmationDialog> {
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(
-              fontSize: 13,
-              color: Colors.black87,
-            ),
+            style: const TextStyle(fontSize: 13, color: Colors.black87),
           ),
         ),
       ],

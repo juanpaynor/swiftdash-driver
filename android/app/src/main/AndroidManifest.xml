@@ -34,11 +34,19 @@
     
     <!-- Vibration permission for notifications -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    
+    <!-- Battery optimization exemption -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    
+    <!-- Schedule exact alarms for background tasks -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
         android:label="SwiftDash Driver"
         android:name="${applicationName}"
-        android:icon="@mipmap/launcher_icon">
+        android:icon="@mipmap/launcher_icon"
+        android:requestLegacyExternalStorage="true"
+        android:usesCleartextTraffic="false">
         
         <!-- Foreground service for background location tracking and delivery offers -->
         <service

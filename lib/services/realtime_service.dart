@@ -7,7 +7,8 @@ import 'optimized_location_service.dart';
 import 'ably_service.dart';
 
 class OptimizedRealtimeService {
-  static final OptimizedRealtimeService _instance = OptimizedRealtimeService._internal();
+  static final OptimizedRealtimeService _instance =
+      OptimizedRealtimeService._internal();
   factory OptimizedRealtimeService() {
     print('🔥 RealtimeService singleton instance requested');
     return _instance;
@@ -15,30 +16,35 @@ class OptimizedRealtimeService {
   OptimizedRealtimeService._internal() {
     print('🔥 RealtimeService singleton instance created');
   }
-  
+
   final SupabaseClient _supabase = Supabase.instance.client;
-  
+
   // Channel management
   final Map<String, RealtimeChannel> _activeChannels = {};
-  
+
   // Stream controllers for real-time data (don't close in singleton!)
   late final _newDeliveriesController = StreamController<Delivery>.broadcast();
-  late final _deliveryUpdatesController = StreamController<Delivery>.broadcast();
-  late final _driverStatusController = StreamController<Map<String, dynamic>>.broadcast();
+  late final _deliveryUpdatesController =
+      StreamController<Delivery>.broadcast();
+  late final _driverStatusController =
+      StreamController<Map<String, dynamic>>.broadcast();
   late final _offerModalController = StreamController<Delivery>.broadcast();
-  late final _locationUpdatesController = StreamController<Map<String, dynamic>>.broadcast();
-  
+  late final _locationUpdatesController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
   // Public streams
   Stream<Delivery> get newDeliveries => _newDeliveriesController.stream;
   Stream<Delivery> get deliveryUpdates => _deliveryUpdatesController.stream;
-  Stream<Map<String, dynamic>> get driverStatusUpdates => _driverStatusController.stream;
+  Stream<Map<String, dynamic>> get driverStatusUpdates =>
+      _driverStatusController.stream;
   Stream<Delivery> get offerModalStream => _offerModalController.stream;
-  Stream<Map<String, dynamic>> get locationUpdates => _locationUpdatesController.stream;
-  
+  Stream<Map<String, dynamic>> get locationUpdates =>
+      _locationUpdatesController.stream;
+
   // Active offer tracking
   Delivery? _currentOffer;
   Timer? _offerTimeoutTimer;
-  
+
   String? _currentDriverId;
   String? _currentDeliveryId;
 
@@ -46,18 +52,21 @@ class OptimizedRealtimeService {
   String? get _authUserId => _supabase.auth.currentUser?.id;
 
   // 🔹 1. GRANULAR CHANNEL SUBSCRIPTIONS
-  
+
   /// Subscribe to deliveries assigned specifically to this driver
   Future<void> subscribeToDriverDeliveries(String driverId) async {
-  _currentDriverId = driverId;
+    _currentDriverId = driverId;
     final channelName = 'driver-deliveries-$driverId';
-    
+
     // Clean up existing subscription
     await _unsubscribeFromChannel(channelName);
-    
+
     final channel = _supabase.channel(channelName);
-    
+
     // Listen for deliveries assigned to this driver
+    // Note: We receive ALL deliveries for this driver (B2C, business dispatch, fleet, etc.)
+    // The driver_source filter is handled at the application level via delivery.isBusinessDispatch
+    // This allows for flexible handling of different delivery types (auto-accept for business, etc.)
     channel.onPostgresChanges(
       event: PostgresChangeEvent.all,
       schema: 'public',
@@ -69,7 +78,7 @@ class OptimizedRealtimeService {
       ),
       callback: (payload) => _handleDriverDeliveryUpdate(payload),
     );
-    
+
     // Listen for delivery offers sent to this driver (using proper status name)
     channel.onPostgresChanges(
       event: PostgresChangeEvent.update,
@@ -82,14 +91,16 @@ class OptimizedRealtimeService {
       ),
       callback: (payload) => _handleNewDeliveryOffer(payload),
     );
-    
+
     // ALSO listen for any delivery updates for this driver (broader filter for debugging)
     channel.onPostgresChanges(
       event: PostgresChangeEvent.all,
-      schema: 'public', 
+      schema: 'public',
       table: 'deliveries',
       callback: (payload) {
-        print('🔍 DEBUGGING: Any delivery update received for driver $driverId');
+        print(
+          '🔍 DEBUGGING: Any delivery update received for driver $driverId',
+        );
         print('🔍 Event: ${payload.eventType}');
         print('🔍 New record driver_id: ${payload.newRecord['driver_id']}');
         print('🔍 New record status: ${payload.newRecord['status']}');
@@ -98,10 +109,10 @@ class OptimizedRealtimeService {
         }
       },
     );
-    
+
     await channel.subscribe();
     _activeChannels[channelName] = channel;
-    
+
     print('🔥 Subscribed to driver deliveries: $channelName');
   }
 
@@ -109,12 +120,12 @@ class OptimizedRealtimeService {
   Future<void> subscribeToSpecificDelivery(String deliveryId) async {
     _currentDeliveryId = deliveryId;
     final channelName = 'delivery-$deliveryId';
-    
+
     // Clean up existing subscription
     await _unsubscribeFromChannel(channelName);
-    
+
     final channel = _supabase.channel(channelName);
-    
+
     channel.onPostgresChanges(
       event: PostgresChangeEvent.all,
       schema: 'public',
@@ -126,20 +137,20 @@ class OptimizedRealtimeService {
       ),
       callback: (payload) => _handleSpecificDeliveryUpdate(payload),
     );
-    
+
     await channel.subscribe();
     _activeChannels[channelName] = channel;
-    
+
     print('🔥 Subscribed to specific delivery: $channelName');
   }
 
   // 🔹 2. GPS LOCATION BROADCASTING (NON-PERSISTENT)
-  
+
   /// Start broadcasting driver location (ABLY ONLY - Supabase WebSocket disabled)
   /// ✅ OPTIMIZED: Customer app uses Ably 'tracking:{deliveryId}', not Supabase channels
   Future<void> startLocationBroadcast(String deliveryId) async {
     print('📍 Starting GPS location tracking for delivery: $deliveryId');
-    
+
     // ✅ FIX: Only start Ably location tracking (via DriverLocationService)
     // Supabase WebSocket channels are NOT used by customer app - disabled to save resources
     final driverId = _currentDriverId ?? _authUserId;
@@ -150,7 +161,9 @@ class OptimizedRealtimeService {
           driverId: driverId,
           deliveryId: deliveryId,
         );
-        print('✅ GPS location tracking started (Ably only) for delivery: $deliveryId');
+        print(
+          '✅ GPS location tracking started (Ably only) for delivery: $deliveryId',
+        );
       } catch (e) {
         print('❌ Failed to start GPS tracking: $e');
       }
@@ -158,7 +171,7 @@ class OptimizedRealtimeService {
       print('⚠️ Cannot start GPS tracking: driver ID not available');
     }
   }
-  
+
   /// Broadcast current location (DEPRECATED - now handled by Ably only)
   /// ✅ OPTIMIZED: This method kept for backward compatibility but does nothing
   /// Location is now broadcast via DriverLocationService → Ably 'tracking:{deliveryId}'
@@ -174,7 +187,7 @@ class OptimizedRealtimeService {
     // ✅ FIX: Supabase WebSocket broadcasting disabled - customer app uses Ably
     // Location is already being broadcast by OptimizedLocationService → Ably
     // This method is kept for backward compatibility but does nothing
-    
+
     // Optional: Update driver current status table (lightweight)
     await _updateDriverCurrentStatus(latitude, longitude, speedKmH);
   }
@@ -189,7 +202,9 @@ class OptimizedRealtimeService {
   /// Subscribe to driver location broadcasts (DEPRECATED - for customers)
   /// ✅ OPTIMIZED: Customer app should use Ably 'tracking:{deliveryId}' instead
   Future<void> subscribeToDriverLocation(String deliveryId) async {
-    print('⚠️ subscribeToDriverLocation called but Supabase WebSocket is disabled');
+    print(
+      '⚠️ subscribeToDriverLocation called but Supabase WebSocket is disabled',
+    );
     print('⚠️ Customer app should use Ably channel: tracking:$deliveryId');
     // Do nothing - customer app should use Ably
   }
@@ -204,7 +219,9 @@ class OptimizedRealtimeService {
     try {
       final driverId = _currentDriverId ?? _authUserId;
       if (driverId == null) {
-        print('❌ Cannot store critical location: driver id unknown (not authenticated)');
+        print(
+          '❌ Cannot store critical location: driver id unknown (not authenticated)',
+        );
         return;
       }
 
@@ -216,7 +233,7 @@ class OptimizedRealtimeService {
         'event_type': eventType,
         'timestamp': DateTime.now().toIso8601String(),
       });
-      
+
       print('📍 Stored critical location event: $eventType');
     } catch (e) {
       print('❌ Error storing critical location: $e');
@@ -224,14 +241,14 @@ class OptimizedRealtimeService {
   }
 
   // 🔹 3. OPTIMIZED EVENT HANDLERS
-  
+
   void _handleDriverDeliveryUpdate(PostgresChangePayload payload) {
     try {
       final delivery = Delivery.fromJson(payload.newRecord);
       print('🚛 Driver delivery update: ${delivery.id} -> ${delivery.status}');
-      
+
       _deliveryUpdatesController.add(delivery);
-      
+
       // Handle status-specific actions
       switch (delivery.status) {
         case DeliveryStatus.pending:
@@ -242,15 +259,19 @@ class OptimizedRealtimeService {
           subscribeToSpecificDelivery(delivery.id);
           // ✅ FIX: Don't start location here - DriverFlowService handles it
           // Location tracking started by DriverFlowService.acceptDeliveryOffer()
-          print('📍 Skipping location broadcast - handled by DriverFlowService');
-          
+          print(
+            '📍 Skipping location broadcast - handled by DriverFlowService',
+          );
+
           // ✅ Business Dispatch Detection (Nov 9, 2025)
           // If this is a new business dispatch assignment, show offer modal
           if (delivery.isNewBusinessAssignment) {
             print('🏢 *** NEW BUSINESS DISPATCH ASSIGNMENT DETECTED ***');
             print('🏢 Business ID: ${delivery.businessId}');
             print('🏢 Driver Source: ${delivery.driverSource}');
-            print('🏢 Triggering offer modal for business delivery: ${delivery.id}');
+            print(
+              '🏢 Triggering offer modal for business delivery: ${delivery.id}',
+            );
             _handleNewOffer(delivery);
           }
           break;
@@ -266,38 +287,51 @@ class OptimizedRealtimeService {
       print('❌ Error handling driver delivery update: $e');
     }
   }
-  
+
   void _handleNewDeliveryOffer(PostgresChangePayload payload) {
     try {
       print('🚨 *** NEW DELIVERY OFFER PAYLOAD RECEIVED ***');
       print('🚨 Payload event: ${payload.eventType}');
       print('🚨 Payload new record: ${payload.newRecord}');
-      
+
       final delivery = Delivery.fromJson(payload.newRecord);
-      
+
       print('🚨 Parsed delivery: ${delivery.id}');
       print('🚨 Delivery status: ${delivery.status}');
-      print('🚨 Delivery status enum: ${delivery.status.toString().split('.').last}');
+      print(
+        '🚨 Delivery status enum: ${delivery.status.toString().split('.').last}',
+      );
       print('🚨 Delivery driver ID: ${delivery.driverId}');
       print('🚨 Current driver ID: $_currentDriverId');
-      
+
       // Only show offers that are offered to the current driver
-      if (delivery.status == DeliveryStatus.driverOffered && delivery.driverId == _currentDriverId) {
+      if (delivery.status == DeliveryStatus.driverOffered &&
+          delivery.driverId == _currentDriverId) {
         print('💰 ✅ NEW DELIVERY OFFER FOR CURRENT DRIVER: ${delivery.id}');
-        print('💰 Driver ID: ${delivery.driverId} matches current: $_currentDriverId');
+        print(
+          '💰 Driver ID: ${delivery.driverId} matches current: $_currentDriverId',
+        );
         _handleNewOffer(delivery);
       } else {
         print('💰 ❌ DELIVERY OFFER NOT FOR CURRENT DRIVER:');
-        print('   - Status: ${delivery.status} (expected: ${DeliveryStatus.driverOffered})');
-        print('   - Status matches: ${delivery.status == DeliveryStatus.driverOffered}');
-        print('   - Driver ID: ${delivery.driverId} (expected: $_currentDriverId)');
-        print('   - Driver ID matches: ${delivery.driverId == _currentDriverId}');
+        print(
+          '   - Status: ${delivery.status} (expected: ${DeliveryStatus.driverOffered})',
+        );
+        print(
+          '   - Status matches: ${delivery.status == DeliveryStatus.driverOffered}',
+        );
+        print(
+          '   - Driver ID: ${delivery.driverId} (expected: $_currentDriverId)',
+        );
+        print(
+          '   - Driver ID matches: ${delivery.driverId == _currentDriverId}',
+        );
       }
     } catch (e, stackTrace) {
       print('❌ Error handling new delivery offer: $e');
       print('❌ Payload: ${payload.newRecord}');
       print('❌ Stack trace: $stackTrace');
-      
+
       // Try to identify which field is causing the issue
       if (e.toString().contains('Bad state: No element')) {
         print('🔍 Debugging individual fields from payload:');
@@ -316,14 +350,16 @@ class OptimizedRealtimeService {
       }
     }
   }
-  
+
   void _handleSpecificDeliveryUpdate(PostgresChangePayload payload) {
     try {
       final delivery = Delivery.fromJson(payload.newRecord);
-      print('📦 Specific delivery update: ${delivery.id} -> ${delivery.status}');
-      
+      print(
+        '📦 Specific delivery update: ${delivery.id} -> ${delivery.status}',
+      );
+
       _deliveryUpdatesController.add(delivery);
-      
+
       // Handle critical status changes
       if (delivery.status == DeliveryStatus.cancelled) {
         _stopLocationBroadcast(delivery.id);
@@ -335,29 +371,29 @@ class OptimizedRealtimeService {
   }
 
   // 🔹 4. CRITICAL REALTIME EVENTS
-  
+
   /// Handle new offer with modal trigger
   void _handleNewOffer(Delivery delivery) {
     print('🚨 *** _handleNewOffer called for delivery: ${delivery.id} ***');
-    
+
     // Cancel any existing offer
     if (_currentOffer != null) {
       print('🔔 Canceling existing offer: ${_currentOffer!.id}');
       _cancelCurrentOffer();
     }
-    
+
     _currentOffer = delivery;
-    
+
     print('🚨 *** ADDING DELIVERY TO OFFER MODAL STREAM ***');
     _offerModalController.add(delivery);
     print('🚨 *** DELIVERY ADDED TO STREAM - LISTENERS SHOULD RECEIVE IT ***');
-    
+
     // Set timeout timer (5 minutes)
     _offerTimeoutTimer = Timer(const Duration(minutes: 5), () {
       print('⏰ Offer timeout for delivery: ${delivery.id}');
       _cancelCurrentOffer();
     });
-    
+
     print('🔔 ✅ New offer modal triggered for delivery: ${delivery.id}');
   }
 
@@ -367,7 +403,7 @@ class OptimizedRealtimeService {
     _offerTimeoutTimer = null;
     _currentOffer = null;
   }
-  
+
   /// Accept delivery offer (delegating to new optimized workflow)
   Future<bool> acceptDeliveryOffer(String deliveryId, String driverId) async {
     print('🔄 Delegating to new acceptance workflow for delivery: $deliveryId');
@@ -378,21 +414,17 @@ class OptimizedRealtimeService {
   Future<bool> declineDeliveryOffer(String deliveryId, String driverId) async {
     try {
       print('❌ Declining delivery offer: $deliveryId');
-      
+
       // Use the dedicated accept_delivery Edge Function with accept: false
       final response = await _supabase.functions.invoke(
         'accept_delivery',
-        body: {
-          'deliveryId': deliveryId,
-          'driverId': driverId,
-          'accept': false,
-        },
+        body: {'deliveryId': deliveryId, 'driverId': driverId, 'accept': false},
       );
-      
+
       if (response.status == 200) {
         final data = response.data as Map<String, dynamic>;
         final success = data['ok'] == true;
-        
+
         if (success) {
           print('✅ Delivery declined successfully: ${data['message']}');
           _cancelCurrentOffer();
@@ -402,68 +434,76 @@ class OptimizedRealtimeService {
           return false;
         }
       } else {
-        print('❌ Decline delivery API call failed with status: ${response.status}');
+        print(
+          '❌ Decline delivery API call failed with status: ${response.status}',
+        );
         return false;
       }
     } catch (e) {
       print('❌ Error declining delivery offer: $e');
-      
+
       // Fallback - just cancel the current offer locally
       _cancelCurrentOffer();
       return true;
     }
   }
-  
+
   /// Update delivery status following Ably-first architecture
-  /// 
+  ///
   /// **CRITICAL**: Per STATUS_UPDATE_FLOW_EXPLANATION.md:
   /// - ALL status changes publish to Ably (real-time customer updates)
   /// - Database ONLY updated for FINAL states: delivered, cancelled, failed
   /// - Intermediate statuses (going_to_pickup, at_pickup, package_collected, in_transit) are Ably-only
-  Future<bool> updateDeliveryStatus(String deliveryId, String status, {
+  Future<bool> updateDeliveryStatus(
+    String deliveryId,
+    String status, {
     double? latitude,
     double? longitude,
   }) async {
     try {
       print('📋 Updating delivery status: $deliveryId -> $status');
-      
+
       // 🚀 STEP 1: ALWAYS publish to Ably for real-time customer updates
-      final driverLocation = (latitude != null && longitude != null) 
-        ? {'latitude': latitude, 'longitude': longitude}
-        : null;
-      
+      final driverLocation = (latitude != null && longitude != null)
+          ? {'latitude': latitude, 'longitude': longitude}
+          : null;
+
       await AblyService().publishStatusUpdate(
         deliveryId: deliveryId,
         status: status,
         driverLocation: driverLocation,
       );
       print('✅ Published status to Ably: $status');
-      
+
       // 🗄️ STEP 2: Update database ONLY for statuses that exist in DB constraint
       // Database accepts: driver_assigned, going_to_pickup, package_collected, going_to_destination, delivered, cancelled, failed
       // Database REJECTS: at_pickup, at_destination, in_transit (these are Ably-only)
       final validDbStatuses = [
         'driver_assigned',
-        'going_to_pickup', 
-        'pickup_arrived',     // ✅ Valid in database
+        'going_to_pickup',
+        'pickup_arrived', // ✅ Valid in database
         'package_collected',
         'going_to_destination',
         'delivered',
         'cancelled',
-        'failed'
+        'failed',
       ];
-      
+
       // Check if this is a final status (moved outside if block)
-      final isFinalStatus = ['delivered', 'cancelled', 'failed'].contains(status);
-      
+      final isFinalStatus = [
+        'delivered',
+        'cancelled',
+        'failed',
+      ].contains(status);
+
       if (validDbStatuses.contains(status)) {
         print('💾 Updating database: $status');
-        
+
         final updateData = {
           'status': status,
           'updated_at': DateTime.now().toIso8601String(),
         };
-        
+
         // Add completion timestamps for final statuses
         if (isFinalStatus) {
           switch (status) {
@@ -479,18 +519,18 @@ class OptimizedRealtimeService {
               break;
           }
         }
-        
+
         // Persist to database
         await _supabase
             .from('deliveries')
             .update(updateData)
             .eq('id', deliveryId);
-        
+
         print('✅ Database updated: $status');
       } else {
         print('⚠️ Skipping database update for Ably-only status: $status');
       }
-      
+
       // 📍 Store location ONLY for final statuses (avoid unnecessary DB writes)
       // Intermediate status locations are already broadcasted via Ably real-time
       if (isFinalStatus && latitude != null && longitude != null) {
@@ -502,7 +542,7 @@ class OptimizedRealtimeService {
         );
         print('💾 Stored final location for: $status');
       }
-      
+
       print('✅ Successfully processed delivery status update: $status');
       return true;
     } catch (e) {
@@ -512,14 +552,20 @@ class OptimizedRealtimeService {
   }
 
   // 🔹 5. LIGHTWEIGHT STATUS UPDATES
-  
+
   /// Update driver current status (lightweight table, not full profile)
-  Future<void> _updateDriverCurrentStatus(double latitude, double longitude, double speedKmH) async {
+  Future<void> _updateDriverCurrentStatus(
+    double latitude,
+    double longitude,
+    double speedKmH,
+  ) async {
     try {
       final status = _determineDriverStatus(speedKmH);
       final driverId = _currentDriverId ?? _authUserId;
       if (driverId == null) {
-        print('❌ Cannot update driver status: driver id unknown (not authenticated)');
+        print(
+          '❌ Cannot update driver status: driver id unknown (not authenticated)',
+        );
         return;
       }
 
@@ -535,7 +581,7 @@ class OptimizedRealtimeService {
       print('❌ Error updating driver current status: $e');
     }
   }
-  
+
   String _determineDriverStatus(double speedKmH) {
     if (_currentDeliveryId != null) {
       return 'delivering';
@@ -547,7 +593,7 @@ class OptimizedRealtimeService {
   }
 
   // 🔹 6. CHANNEL MANAGEMENT
-  
+
   Future<void> _unsubscribeFromChannel(String channelName) async {
     final channel = _activeChannels[channelName];
     if (channel != null) {
@@ -556,11 +602,11 @@ class OptimizedRealtimeService {
       print('🔌 Unsubscribed from channel: $channelName');
     }
   }
-  
+
   /// Stop location broadcast (OPTIMIZED - only stops GPS tracking, no WebSocket cleanup needed)
   Future<void> _stopLocationBroadcast(String deliveryId) async {
     // ✅ FIX: No Supabase WebSocket channel to unsubscribe from - only stop GPS tracking
-    
+
     // Stop GPS location tracking
     try {
       final locationService = OptimizedLocationService();
@@ -574,22 +620,24 @@ class OptimizedRealtimeService {
   }
 
   // 🔹 7. LEGACY METHODS (Updated)
-  
+
   /// Initialize realtime subscriptions (optimized)
   Future<void> initializeRealtimeSubscriptions(String driverId) async {
     try {
-      print('🚀 Initializing optimized realtime subscriptions for driver: $driverId');
-      
+      print(
+        '🚀 Initializing optimized realtime subscriptions for driver: $driverId',
+      );
+
       // Subscribe to driver-specific deliveries only
       await subscribeToDriverDeliveries(driverId);
-      
+
       print('✅ Optimized realtime subscriptions initialized successfully');
     } catch (e) {
       print('❌ Error initializing realtime subscriptions: $e');
       rethrow;
     }
   }
-  
+
   /// Update driver online status (critical event)
   Future<void> updateDriverOnlineStatus(String driverId, bool isOnline) async {
     try {
@@ -598,17 +646,18 @@ class OptimizedRealtimeService {
           .from('driver_profiles')
           .update({
             'is_online': isOnline,
-            'is_available': isOnline,  // Available when online, unavailable when offline
+            'is_available':
+                isOnline, // Available when online, unavailable when offline
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('id', driverId);
-      
+
       print('📱 Updated driver online status: $isOnline');
     } catch (e) {
       print('❌ Error updating driver online status: $e');
     }
   }
-  
+
   /// Get pending deliveries for driver
   Future<List<Delivery>> getPendingDeliveries(String driverId) async {
     try {
@@ -618,22 +667,20 @@ class OptimizedRealtimeService {
           .eq('driver_id', driverId)
           .inFilter('status', [
             'driver_assigned',
-            'pickup_arrived',      // ✅ FIX: Include arrival at pickup
+            'pickup_arrived', // ✅ FIX: Include arrival at pickup
             'package_collected',
             'in_transit',
-            'at_destination',      // ✅ FIX: Include arrival at delivery (though customer app uses in_transit)
+            'at_destination', // ✅ FIX: Include arrival at delivery (though customer app uses in_transit)
           ])
           .order('created_at', ascending: true);
-      
-      return (response as List)
-          .map((data) => Delivery.fromJson(data))
-          .toList();
+
+      return (response as List).map((data) => Delivery.fromJson(data)).toList();
     } catch (e) {
       print('❌ Error fetching pending deliveries: $e');
       return [];
     }
   }
-  
+
   /// Get available delivery offers (limited scope)
   Future<List<Delivery>> getAvailableDeliveryOffers() async {
     try {
@@ -644,16 +691,14 @@ class OptimizedRealtimeService {
           .filter('driver_id', 'is', null) // Not assigned yet
           .order('created_at', ascending: true)
           .limit(5); // Limit to recent offers only
-      
-      return (response as List)
-          .map((data) => Delivery.fromJson(data))
-          .toList();
+
+      return (response as List).map((data) => Delivery.fromJson(data)).toList();
     } catch (e) {
       print('❌ Error fetching delivery offers: $e');
       return [];
     }
   }
-  
+
   /// Show improved delivery offer modal
   static void showImprovedOfferModal(
     BuildContext context,
@@ -665,7 +710,8 @@ class OptimizedRealtimeService {
     showDialog(
       context: context,
       barrierDismissible: false,
-      useSafeArea: true,  // ✅ FIX: Prevent parent screen widgets from bleeding through
+      useSafeArea:
+          true, // ✅ FIX: Prevent parent screen widgets from bleeding through
       builder: (context) => ImprovedDeliveryOfferModal(
         delivery: delivery,
         onAccept: () async {
@@ -673,13 +719,13 @@ class OptimizedRealtimeService {
             print('🎯 Modal onAccept called - starting acceptance flow');
             // call parent accept callback which returns true on success
             final ok = await onAccept(delivery.id, driverId);
-            
+
             if (ok) {
               print('✅ Acceptance successful - closing modal and navigating');
               // close the modal when accept succeeded
               if (Navigator.of(context).canPop()) {
                 Navigator.of(context).pop();
-                
+
                 // Navigate to active delivery screen after a brief delay
                 Future.delayed(const Duration(milliseconds: 300), () {
                   if (Navigator.of(context).mounted) {
@@ -713,68 +759,79 @@ class OptimizedRealtimeService {
   }
 
   // 🔹 8. NEW OFFER/ACCEPTANCE WORKFLOW
-  
+
   // Guard against concurrent accept attempts
   static final Set<String> _processingAccepts = <String>{};
 
   /// Accept a delivery offer (NEW WORKFLOW)
-  Future<bool> acceptDeliveryOfferNew(String deliveryId, String driverId) async {
+  Future<bool> acceptDeliveryOfferNew(
+    String deliveryId,
+    String driverId,
+  ) async {
     // Prevent concurrent accepts for the same delivery
     if (_processingAccepts.contains(deliveryId)) {
       print('⚠️ Already processing accept for delivery: $deliveryId');
       return false;
     }
-    
+
     _processingAccepts.add(deliveryId);
-    
+
     try {
       print('🚨 *** ACCEPTING DELIVERY OFFER (NEW WORKFLOW) ***');
       print('🚨 Delivery ID: $deliveryId');
       print('🚨 Driver ID: $driverId');
-      
+
       // ⭐ Use fleet-safe helper function (Added Nov 3, 2025)
       // This handles: delivery status update, driver availability, and current_status
-      final result = await _supabase.rpc(
-        'accept_delivery_safe',
-        params: {
-          'p_delivery_id': deliveryId,
-          'p_driver_id': driverId,
-        },
-      ).timeout(
+      final result = await _supabase
+          .rpc(
+            'accept_delivery_safe',
+            params: {'p_delivery_id': deliveryId, 'p_driver_id': driverId},
+          )
+          .timeout(
             const Duration(seconds: 10),
             onTimeout: () {
               print('❌ Accept delivery timeout after 10 seconds');
-              throw TimeoutException('Database update timed out', const Duration(seconds: 10));
+              throw TimeoutException(
+                'Database update timed out',
+                const Duration(seconds: 10),
+              );
             },
           );
-      
+
       if (result != null && result['success'] == true) {
         print('🚨 ✅ DELIVERY OFFER ACCEPTED SUCCESSFULLY');
         print('📱 Driver status updated to busy');
-        
+
         // Cancel any current offer modal
         _cancelCurrentOffer();
-        
+
         // Subscribe to specific delivery updates
         await subscribeToSpecificDelivery(deliveryId);
-        
+
         // ✅ FIX: Don't start location here - DriverFlowService handles it
         // Location tracking is started by DriverFlowService.acceptDeliveryOffer()
         // to avoid duplicate location services fighting each other
         print('📍 Location tracking will be started by DriverFlowService');
-        
+
         // ✅ Send 'going_to_pickup' status via Ably automatically (non-blocking)
         // This happens immediately after driver accepts, no need to wait for Navigate button
-        AblyService().publishStatusUpdate(
-          deliveryId: deliveryId,
-          status: 'going_to_pickup',
-          notes: 'Driver is heading to pickup location',
-        ).catchError((e) => debugPrint('⚠️ Ably publish failed: $e'));
-        debugPrint('📢 Sent going_to_pickup status via Ably (non-blocking, automatic after acceptance)');
-        
+        AblyService()
+            .publishStatusUpdate(
+              deliveryId: deliveryId,
+              status: 'going_to_pickup',
+              notes: 'Driver is heading to pickup location',
+            )
+            .catchError((e) => debugPrint('⚠️ Ably publish failed: $e'));
+        debugPrint(
+          '📢 Sent going_to_pickup status via Ably (non-blocking, automatic after acceptance)',
+        );
+
         return true;
       } else {
-        print('🚨 ❌ DELIVERY OFFER ACCEPTANCE FAILED - offer may have expired or been taken');
+        print(
+          '🚨 ❌ DELIVERY OFFER ACCEPTANCE FAILED - offer may have expired or been taken',
+        );
         return false;
       }
     } catch (e) {
@@ -784,14 +841,17 @@ class OptimizedRealtimeService {
       _processingAccepts.remove(deliveryId);
     }
   }
-  
+
   /// Decline a delivery offer (NEW WORKFLOW)
-  Future<bool> declineDeliveryOfferNew(String deliveryId, String driverId) async {
+  Future<bool> declineDeliveryOfferNew(
+    String deliveryId,
+    String driverId,
+  ) async {
     try {
       print('🚨 *** DECLINING DELIVERY OFFER (NEW WORKFLOW) ***');
       print('🚨 Delivery ID: $deliveryId');
       print('🚨 Driver ID: $driverId');
-      
+
       // CRITICAL FIX: Only decline if delivery is still offered to this driver
       final result = await _supabase
           .from('deliveries')
@@ -808,17 +868,19 @@ class OptimizedRealtimeService {
           .timeout(
             const Duration(seconds: 5),
             onTimeout: () {
-              print('⚠️ Decline delivery timeout - delivery may have already changed');
+              print(
+                '⚠️ Decline delivery timeout - delivery may have already changed',
+              );
               return null;
             },
           );
-      
+
       if (result != null) {
         print('🚨 ✅ DELIVERY OFFER DECLINED SUCCESSFULLY - back to pending');
-        
+
         // Cancel current offer modal
         _cancelCurrentOffer();
-        
+
         return true;
       } else {
         print('🚨 ❌ DELIVERY OFFER DECLINE FAILED - offer may have expired');
@@ -831,31 +893,33 @@ class OptimizedRealtimeService {
   }
 
   // 🔹 9. CLEANUP & DISPOSAL
-  
+
   /// Clean up channels for a specific delivery (call when delivery is complete)
   Future<void> cleanupDeliveryChannels(String deliveryId) async {
     try {
       final channelsToRemove = <String>[];
-      
+
       // Find all channels related to this delivery
       for (final channelName in _activeChannels.keys) {
         if (channelName.contains(deliveryId)) {
           channelsToRemove.add(channelName);
         }
       }
-      
+
       // Unsubscribe and remove each channel
       for (final channelName in channelsToRemove) {
         await _unsubscribeFromChannel(channelName);
         debugPrint('🧹 Cleaned up realtime channel: $channelName');
       }
-      
-      debugPrint('✅ Cleaned up ${channelsToRemove.length} realtime channel(s) for delivery: $deliveryId');
+
+      debugPrint(
+        '✅ Cleaned up ${channelsToRemove.length} realtime channel(s) for delivery: $deliveryId',
+      );
     } catch (e) {
       debugPrint('⚠️ Error cleaning up delivery channels: $e');
     }
   }
-  
+
   /// Clean up all subscriptions and resources
   Future<void> dispose() async {
     try {
@@ -863,14 +927,16 @@ class OptimizedRealtimeService {
       for (final channelName in _activeChannels.keys.toList()) {
         await _unsubscribeFromChannel(channelName);
       }
-      
+
       // Cancel any active offer timer
       _offerTimeoutTimer?.cancel();
-      
+
       // 🚨 DON'T CLOSE STREAM CONTROLLERS IN SINGLETON!
       // They need to persist for the lifetime of the app
       // Closing them prevents listeners from receiving future events
-      print('🧹 Optimized realtime service channels unsubscribed (stream controllers kept alive)');
+      print(
+        '🧹 Optimized realtime service channels unsubscribed (stream controllers kept alive)',
+      );
     } catch (e) {
       print('❌ Error disposing realtime service: $e');
     }

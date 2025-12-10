@@ -10,13 +10,13 @@ import 'package:url_launcher/url_launcher.dart';
 class MultiStopDeliveryPanel extends StatefulWidget {
   final Delivery delivery;
   final VoidCallback onStopCompleted;
-  
+
   const MultiStopDeliveryPanel({
     super.key,
     required this.delivery,
     required this.onStopCompleted,
   });
-  
+
   @override
   State<MultiStopDeliveryPanel> createState() => _MultiStopDeliveryPanelState();
 }
@@ -24,25 +24,25 @@ class MultiStopDeliveryPanel extends StatefulWidget {
 class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
   final DeliveryStopService _stopService = DeliveryStopService();
   final DocumentUploadService _uploadService = DocumentUploadService();
-  
+
   List<DeliveryStop> _stops = [];
   DeliveryStop? _currentStop;
   bool _isLoading = false;
   bool _isCompletingStop = false;
-  
+
   @override
   void initState() {
     super.initState();
     _loadStops();
   }
-  
+
   Future<void> _loadStops() async {
     setState(() => _isLoading = true);
-    
+
     try {
       final stops = await _stopService.getDeliveryStops(widget.delivery.id);
       final currentStop = await _stopService.getCurrentStop(widget.delivery.id);
-      
+
       setState(() {
         _stops = stops;
         _currentStop = currentStop;
@@ -51,44 +51,47 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading stops: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error loading stops: $e')));
       }
     }
   }
-  
+
   Future<void> _completeCurrentStop() async {
     if (_currentStop == null) return;
-    
+
     setState(() => _isCompletingStop = true);
-    
+
     try {
-      // Capture proof photo
+      // 🔧 DEV MODE: Make proof photo optional
       final imageFile = await _uploadService.captureImage();
-      if (imageFile == null) {
-        throw Exception('Proof photo is required');
+      String? proofPhotoUrl;
+
+      if (imageFile != null) {
+        // Upload proof photo
+        proofPhotoUrl = await _uploadService.uploadProofOfDelivery(
+          imageFile,
+          '${widget.delivery.id}_stop_${_currentStop!.stopNumber}_${DateTime.now().millisecondsSinceEpoch}.jpg',
+        );
+      } else {
+        print('⚠️ DEV MODE: Skipping proof photo for multi-stop delivery');
+        proofPhotoUrl = 'https://placeholder.dev/no-multi-stop-photo';
       }
-      
-      // Upload proof photo
-      final proofPhotoUrl = await _uploadService.uploadProofOfDelivery(
-        imageFile,
-        '${widget.delivery.id}_stop_${_currentStop!.stopNumber}_${DateTime.now().millisecondsSinceEpoch}.jpg',
-      );
-      
+
       String? signatureUrl;
-      
+
       // Get signature for dropoffs
       if (_currentStop!.isDropoff && mounted) {
         signatureUrl = await _showSignatureDialog();
       }
-      
+
       // Get completion notes
       String? notes;
       if (mounted) {
         notes = await _showNotesDialog();
       }
-      
+
       // Complete the stop
       await _stopService.completeStop(
         stopId: _currentStop!.id,
@@ -97,20 +100,20 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
         signatureUrl: signatureUrl,
         completionNotes: notes,
       );
-      
+
       // Reload stops
       await _loadStops();
-      
+
       // Notify parent
       widget.onStopCompleted();
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              _currentStop!.isPickup 
-                  ? 'Package collected successfully!' 
-                  : 'Delivery completed successfully!'
+              _currentStop!.isPickup
+                  ? 'Package collected successfully!'
+                  : 'Delivery completed successfully!',
             ),
             backgroundColor: Colors.green,
           ),
@@ -129,17 +132,17 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
       setState(() => _isCompletingStop = false);
     }
   }
-  
+
   Future<String?> _showSignatureDialog() async {
     return await showDialog<String>(
       context: context,
       builder: (context) => const SignatureCaptureDialog(),
     );
   }
-  
+
   Future<String?> _showNotesDialog() async {
     final controller = TextEditingController();
-    
+
     return await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -165,18 +168,22 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
       ),
     );
   }
-  
+
   Future<void> _navigateToStop(DeliveryStop stop) async {
     try {
       // ✅ FIX: Try native Google Maps deeplink first, fallback to HTTPS
-      final nativeUri = Uri.parse('comgooglemaps://?daddr=${stop.latitude},${stop.longitude}&directionsmode=driving');
-      
+      final nativeUri = Uri.parse(
+        'comgooglemaps://?daddr=${stop.latitude},${stop.longitude}&directionsmode=driving',
+      );
+
       if (await canLaunchUrl(nativeUri)) {
         await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
         print('🗺️ Navigating to stop via Google Maps native deeplink');
       } else {
         // Fallback to HTTPS URL (works on all platforms)
-        final webUri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=${stop.latitude},${stop.longitude}&travelmode=driving');
+        final webUri = Uri.parse(
+          'https://www.google.com/maps/dir/?api=1&destination=${stop.latitude},${stop.longitude}&travelmode=driving',
+        );
         if (await canLaunchUrl(webUri)) {
           await launchUrl(webUri, mode: LaunchMode.externalApplication);
           print('🗺️ Navigating to stop via Google Maps HTTPS link');
@@ -189,29 +196,33 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Could not open navigation app. Please ensure Google Maps is installed.'),
+            content: Text(
+              'Could not open navigation app. Please ensure Google Maps is installed.',
+            ),
             backgroundColor: Colors.red,
           ),
         );
       }
     }
   }
-  
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
-    
+
     if (_currentStop == null) {
       return const Center(
         child: Text('All stops completed!', style: TextStyle(fontSize: 18)),
       );
     }
-    
-    final remainingStops = _stops.where((s) => s.isPending && s.stopNumber > _currentStop!.stopNumber).toList();
+
+    final remainingStops = _stops
+        .where((s) => s.isPending && s.stopNumber > _currentStop!.stopNumber)
+        .toList();
     final completedStops = _stops.where((s) => s.isCompleted).toList();
-    
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -220,15 +231,15 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
           // Progress indicator
           _buildProgressIndicator(),
           const SizedBox(height: 24),
-          
+
           // Current stop card
           _buildCurrentStopCard(),
           const SizedBox(height: 16),
-          
+
           // Action button
           _buildActionButton(),
           const SizedBox(height: 24),
-          
+
           // Remaining stops
           if (remainingStops.isNotEmpty) ...[
             const Text(
@@ -238,23 +249,26 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
             const SizedBox(height: 12),
             ...remainingStops.map((stop) => _buildStopCard(stop, false)),
           ],
-          
+
           // Completed stops
           if (completedStops.isNotEmpty) ...[
             const SizedBox(height: 16),
             ExpansionTile(
               title: Text('Completed Stops (${completedStops.length})'),
-              children: completedStops.map((stop) => _buildStopCard(stop, true)).toList(),
+              children: completedStops
+                  .map((stop) => _buildStopCard(stop, true))
+                  .toList(),
             ),
           ],
         ],
       ),
     );
   }
-  
+
   Widget _buildProgressIndicator() {
-    final progress = widget.delivery.currentStopIndex / widget.delivery.totalStops;
-    
+    final progress =
+        widget.delivery.currentStopIndex / widget.delivery.totalStops;
+
     return Column(
       children: [
         Row(
@@ -273,7 +287,11 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.location_on, color: Colors.blue.shade700, size: 16),
+                  Icon(
+                    Icons.location_on,
+                    color: Colors.blue.shade700,
+                    size: 16,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     '${widget.delivery.totalStops} STOPS',
@@ -298,10 +316,10 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
       ],
     );
   }
-  
+
   Widget _buildCurrentStopCard() {
     if (_currentStop == null) return const SizedBox();
-    
+
     return Card(
       elevation: 4,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -315,12 +333,16 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: _currentStop!.isPickup ? Colors.orange.shade100 : Colors.green.shade100,
+                    color: _currentStop!.isPickup
+                        ? Colors.orange.shade100
+                        : Colors.green.shade100,
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
                     _currentStop!.isPickup ? Icons.store : Icons.home,
-                    color: _currentStop!.isPickup ? Colors.orange.shade700 : Colors.green.shade700,
+                    color: _currentStop!.isPickup
+                        ? Colors.orange.shade700
+                        : Colors.green.shade700,
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -329,17 +351,24 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _currentStop!.isPickup ? 'PICKUP' : 'DROP-OFF #${_currentStop!.stopNumber}',
+                        _currentStop!.isPickup
+                            ? 'PICKUP'
+                            : 'DROP-OFF #${_currentStop!.stopNumber}',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: _currentStop!.isPickup ? Colors.orange.shade700 : Colors.green.shade700,
+                          color: _currentStop!.isPickup
+                              ? Colors.orange.shade700
+                              : Colors.green.shade700,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         _currentStop!.address,
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ],
                   ),
@@ -367,7 +396,8 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
                 ),
               ],
             ),
-            if (_currentStop!.instructions != null && _currentStop!.instructions!.isNotEmpty) ...[
+            if (_currentStop!.instructions != null &&
+                _currentStop!.instructions!.isNotEmpty) ...[
               const SizedBox(height: 8),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -397,10 +427,10 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
       ),
     );
   }
-  
+
   Widget _buildActionButton() {
     if (_currentStop == null) return const SizedBox();
-    
+
     return ElevatedButton(
       onPressed: _isCompletingStop ? null : _completeCurrentStop,
       style: ElevatedButton.styleFrom(
@@ -411,20 +441,26 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
       child: _isCompletingStop
           ? const CircularProgressIndicator(color: Colors.white)
           : Text(
-              _currentStop!.isPickup ? 'PACKAGE COLLECTED' : 'COMPLETE DELIVERY',
+              _currentStop!.isPickup
+                  ? 'PACKAGE COLLECTED'
+                  : 'COMPLETE DELIVERY',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
     );
   }
-  
+
   Widget _buildStopCard(DeliveryStop stop, bool isCompleted) {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ListTile(
         leading: CircleAvatar(
-          backgroundColor: isCompleted ? Colors.green.shade100 : Colors.grey.shade200,
+          backgroundColor: isCompleted
+              ? Colors.green.shade100
+              : Colors.grey.shade200,
           child: Icon(
-            isCompleted ? Icons.check : (stop.isPickup ? Icons.store : Icons.home),
+            isCompleted
+                ? Icons.check
+                : (stop.isPickup ? Icons.store : Icons.home),
             color: isCompleted ? Colors.green.shade700 : Colors.grey.shade600,
           ),
         ),
@@ -451,7 +487,7 @@ class _MultiStopDeliveryPanelState extends State<MultiStopDeliveryPanel> {
       ),
     );
   }
-  
+
   Future<void> _makePhoneCall(String phoneNumber) async {
     final uri = Uri.parse('tel:$phoneNumber');
     if (await canLaunchUrl(uri)) {

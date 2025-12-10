@@ -5,10 +5,10 @@ import 'navigation_service.dart'; // Import new navigation service
 
 class MapboxService {
   // Load token from environment (secure)
-  static String get accessToken => 
-    dotenv.env['MAPBOX_ACCESS_TOKEN'] ?? 
-    (throw Exception('❌ MAPBOX_ACCESS_TOKEN not found in .env file'));
-  
+  static String get accessToken =>
+      dotenv.env['MAPBOX_ACCESS_TOKEN'] ??
+      (throw Exception('❌ MAPBOX_ACCESS_TOKEN not found in .env file'));
+
   // Philippines bounding box and center
   static const String philippinesBbox = '116.9283,4.5693,126.6043,21.1210';
   static const String manilaProximity = '121.0244,14.5995';
@@ -16,22 +16,23 @@ class MapboxService {
   /// Get route data between two points
   /// 🔄 ENHANCED: Now supports both basic routing and professional navigation
   static Future<RouteData?> getRoute(
-    double fromLat, 
-    double fromLng, 
-    double toLat, 
+    double fromLat,
+    double fromLng,
+    double toLat,
     double toLng, {
     bool useNavigation = false, // NEW: Enable professional navigation
   }) async {
     try {
       // If professional navigation requested, use NavigationService
       if (useNavigation) {
-        final navRoute = await NavigationService.instance.calculateNavigationRoute(
-          startLat: fromLat,
-          startLng: fromLng,
-          endLat: toLat,
-          endLng: toLng,
-        );
-        
+        final navRoute = await NavigationService.instance
+            .calculateNavigationRoute(
+              startLat: fromLat,
+              startLng: fromLng,
+              endLat: toLat,
+              endLng: toLng,
+            );
+
         if (navRoute != null) {
           // Convert NavigationRoute to RouteData for compatibility
           return RouteData(
@@ -43,22 +44,23 @@ class MapboxService {
           );
         }
       }
-      
+
       // Fallback to basic Mapbox routing (existing functionality)
-      final url = 'https://api.mapbox.com/directions/v5/mapbox/driving'
+      final url =
+          'https://api.mapbox.com/directions/v5/mapbox/driving'
           '/$fromLng,$fromLat;$toLng,$toLat'
           '?access_token=$accessToken'
           '&geometries=geojson'
           '&overview=simplified';
 
       final response = await http.get(Uri.parse(url));
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        
+
         if (data['routes'] != null && data['routes'].isNotEmpty) {
           final route = data['routes'][0];
-          
+
           return RouteData(
             distance: (route['distance'] / 1000).toDouble(), // Convert to km
             duration: (route['duration'] / 60).toInt(), // Convert to minutes
@@ -67,7 +69,7 @@ class MapboxService {
           );
         }
       }
-      
+
       print('Mapbox API error: ${response.statusCode} - ${response.body}');
       return null;
     } catch (e) {
@@ -104,32 +106,42 @@ class MapboxService {
     final centerLng = (pickupLng + deliveryLng) / 2;
     final centerLat = (pickupLat + deliveryLat) / 2;
 
-    String overlays = '$pickupMarker,$deliveryMarker';
+    String overlays = '';
 
-    // Add route polyline if available
+    // Add route polyline if available (must come BEFORE markers so markers appear on top)
     if (routeData != null && routeData.geometry['coordinates'] != null) {
       try {
         final coordinates = routeData.geometry['coordinates'] as List;
         if (coordinates.isNotEmpty) {
           // Create a simplified polyline for the route
           final routePolyline = _createPolylineOverlay(coordinates);
-          overlays = '$routePolyline,$overlays';
+          overlays = routePolyline;
         }
       } catch (e) {
         print('⚠️ Error adding route to static map: $e');
       }
     }
 
+    // Add markers AFTER polyline so they appear on top
+    if (overlays.isNotEmpty) {
+      overlays = '$overlays,$pickupMarker,$deliveryMarker';
+    } else {
+      overlays = '$pickupMarker,$deliveryMarker';
+    }
+
     // Use auto-fit if route data available, otherwise manual zoom
     String positioning;
-    if (routeData != null && routeData.bbox.isNotEmpty && routeData.bbox.length >= 4) {
+    if (routeData != null &&
+        routeData.bbox.isNotEmpty &&
+        routeData.bbox.length >= 4) {
       // Auto-fit to route bounds
       positioning = 'auto';
     } else {
       positioning = '$centerLng,$centerLat,$zoom';
     }
 
-    final url = 'https://api.mapbox.com/styles/v1/mapbox/streets-v11/static/$overlays/$positioning/${width}x${height}@2x?access_token=$accessToken';
+    final url =
+        'https://api.mapbox.com/styles/v1/mapbox/streets-v11/static/$overlays/$positioning/${width}x${height}@2x?access_token=$accessToken';
     return url;
   }
 
@@ -137,7 +149,7 @@ class MapboxService {
   static String _createPolylineOverlay(List coordinates) {
     // For static maps, we use simplified coordinates to avoid URL length limits
     final simplified = <List<double>>[];
-    
+
     // Take every 3rd coordinate to simplify the route (avoid URL length issues)
     for (int i = 0; i < coordinates.length; i += 3) {
       final coord = coordinates[i] as List;
@@ -145,23 +157,25 @@ class MapboxService {
         simplified.add([coord[0] as double, coord[1] as double]);
       }
     }
-    
+
     // Ensure we have start and end points
     if (simplified.isNotEmpty && coordinates.isNotEmpty) {
       final first = coordinates.first as List;
       final last = coordinates.last as List;
-      
+
       if (simplified.first[0] != first[0] || simplified.first[1] != first[1]) {
         simplified.insert(0, [first[0] as double, first[1] as double]);
       }
-      
+
       if (simplified.last[0] != last[0] || simplified.last[1] != last[1]) {
         simplified.add([last[0] as double, last[1] as double]);
       }
     }
-    
+
     // Create path string: path-{strokeWidth}+{color}({coordinates})
-    final pathCoords = simplified.map((coord) => '${coord[0]},${coord[1]}').join(',');
+    final pathCoords = simplified
+        .map((coord) => '${coord[0]},${coord[1]}')
+        .join(',');
     return 'path-3+3366ff($pathCoords)'; // Blue route line, 3px width
   }
 
@@ -170,7 +184,7 @@ class MapboxService {
     // Base fare + distance rate (adjust these values as needed)
     const double baseFare = 50.0; // ₱50 base fare
     const double perKmRate = 15.0; // ₱15 per km
-    
+
     return baseFare + (distanceKm * perKmRate);
   }
 
@@ -199,22 +213,22 @@ class MapboxService {
     try {
       final coordinates = geometry['coordinates'] as List;
       if (coordinates.isEmpty) return [];
-      
+
       double minLng = double.infinity;
       double maxLng = double.negativeInfinity;
       double minLat = double.infinity;
       double maxLat = double.negativeInfinity;
-      
+
       for (final coord in coordinates) {
         final lng = (coord[0] as num).toDouble();
         final lat = (coord[1] as num).toDouble();
-        
+
         minLng = minLng < lng ? minLng : lng;
         maxLng = maxLng > lng ? maxLng : lng;
         minLat = minLat < lat ? minLat : lat;
         maxLat = maxLat > lat ? maxLat : lat;
       }
-      
+
       return [minLng, minLat, maxLng, maxLat];
     } catch (e) {
       print('Error calculating bbox: $e');
@@ -242,7 +256,7 @@ class RouteData {
   bool get hasNavigation => navigationRoute != null;
 
   /// Get turn-by-turn instructions (empty if basic route)
-  List<NavigationInstruction> get instructions => 
+  List<NavigationInstruction> get instructions =>
       navigationRoute?.instructions ?? [];
 
   @override

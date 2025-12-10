@@ -12,10 +12,12 @@ class ImprovedEditProfileScreen extends StatefulWidget {
   const ImprovedEditProfileScreen({super.key});
 
   @override
-  State<ImprovedEditProfileScreen> createState() => _ImprovedEditProfileScreenState();
+  State<ImprovedEditProfileScreen> createState() =>
+      _ImprovedEditProfileScreenState();
 }
 
-class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> with SingleTickerProviderStateMixin {
+class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen>
+    with SingleTickerProviderStateMixin {
   final DocumentUploadService _docService = DocumentUploadService();
   final AuthService _authService = AuthService();
   final _formKey = GlobalKey<FormState>();
@@ -43,7 +45,7 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
   bool _isLoading = true;
   bool _isValidatingCode = false;
   Driver? _currentDriver;
-  
+
   // Existing image URLs
   String? _existingProfileUrl;
   String? _existingVehicleSideUrl;
@@ -83,9 +85,25 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
       final supabase = Supabase.instance.client;
       final response = await supabase
           .from('driver_profiles')
-          .select('*, business:business_fleet!managed_by_business_id(name)')
+          .select('*')
           .eq('user_id', user.id)
           .single();
+
+      // Fetch business name separately if business ID exists
+      if (response['managed_by_business_id'] != null) {
+        try {
+          final businessResponse = await supabase
+              .from('business_fleet')
+              .select('name')
+              .eq('id', response['managed_by_business_id'])
+              .maybeSingle();
+          if (businessResponse != null) {
+            response['business'] = businessResponse;
+          }
+        } catch (e) {
+          print('⚠️ Could not fetch business details: $e');
+        }
+      }
 
       setState(() {
         _currentDriver = Driver.fromJson(response);
@@ -95,7 +113,7 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
         _vehicleModelController.text = response['vehicle_model'] ?? '';
         _plateNumberController.text = response['plate_number'] ?? '';
         _ltfrbController.text = response['ltfrb_number'] ?? '';
-        
+
         _existingProfileUrl = response['profile_picture_url'];
         _existingVehicleSideUrl = response['vehicle_side_image_url'];
         _existingVehicleBackUrl = response['vehicle_back_image_url'];
@@ -113,9 +131,9 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
       print('Error loading profile: $e');
       setState(() => _isLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading profile: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error loading profile: $e')));
       }
     }
   }
@@ -156,7 +174,9 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
   }
 
   Future<void> _pick(String type) async {
-    final File? pickedFile = await _docService.captureImage(source: ImageSource.gallery);
+    final File? pickedFile = await _docService.captureImage(
+      source: ImageSource.gallery,
+    );
     if (pickedFile == null) return;
 
     // Check file size (5MB limit)
@@ -195,7 +215,8 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
     if (!_formKey.currentState!.validate()) return;
 
     // Validate invitation code if provided
-    if (_invitationCodeController.text.trim().isNotEmpty && _validatedBusinessName == null) {
+    if (_invitationCodeController.text.trim().isNotEmpty &&
+        _validatedBusinessName == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please validate the invitation code first'),
@@ -243,10 +264,7 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
       }
 
       if (_ltfrbImage != null) {
-        ltfrbUrl = await _docService.uploadLTFRBPicture(
-          _ltfrbImage!,
-          user.id,
-        );
+        ltfrbUrl = await _docService.uploadLTFRBPicture(_ltfrbImage!, user.id);
       }
 
       // Prepare update data
@@ -264,13 +282,16 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
       if (_phoneController.text != _currentDriver?.phoneNumber) {
         updateData['phone_number'] = _phoneController.text.trim();
       }
-      if (_vehicleModelController.text.trim() != (_currentDriver?.vehicleModel ?? '')) {
+      if (_vehicleModelController.text.trim() !=
+          (_currentDriver?.vehicleModel ?? '')) {
         updateData['vehicle_model'] = _vehicleModelController.text.trim();
       }
-      if (_plateNumberController.text.trim() != (_currentDriver?.plateNumber ?? '')) {
+      if (_plateNumberController.text.trim() !=
+          (_currentDriver?.plateNumber ?? '')) {
         updateData['plate_number'] = _plateNumberController.text.trim();
       }
-      if (_ltfrbController.text.trim() != (_currentDriver?.licenseNumber ?? '')) {
+      if (_ltfrbController.text.trim() !=
+          (_currentDriver?.licenseNumber ?? '')) {
         updateData['ltfrb_number'] = _ltfrbController.text.trim();
       }
 
@@ -289,14 +310,15 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
       }
 
       // Handle business invitation code
-      if (_invitationCodeController.text.trim().isNotEmpty && _validatedBusinessName != null) {
+      if (_invitationCodeController.text.trim().isNotEmpty &&
+          _validatedBusinessName != null) {
         // Fetch business ID
         final businessResponse = await supabase
             .from('business_fleet')
             .select('id')
             .eq('invitation_code', _invitationCodeController.text.trim())
             .single();
-        
+
         updateData['managed_by_business_id'] = businessResponse['id'];
         updateData['employment_type'] = 'fleet_driver';
       }
@@ -331,8 +353,15 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
     }
   }
 
-  Widget _imageTile(String label, File? imageFile, String? existingUrl, VoidCallback onTap, {bool isCircle = false}) {
-    final hasImage = imageFile != null || (existingUrl != null && existingUrl.isNotEmpty);
+  Widget _imageTile(
+    String label,
+    File? imageFile,
+    String? existingUrl,
+    VoidCallback onTap, {
+    bool isCircle = false,
+  }) {
+    final hasImage =
+        imageFile != null || (existingUrl != null && existingUrl.isNotEmpty);
 
     return GestureDetector(
       onTap: onTap,
@@ -350,16 +379,18 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
         ),
         child: hasImage
             ? ClipRRect(
-                borderRadius: isCircle ? BorderRadius.circular(70) : BorderRadius.circular(14),
+                borderRadius: isCircle
+                    ? BorderRadius.circular(70)
+                    : BorderRadius.circular(14),
                 child: imageFile != null
                     ? Image.file(imageFile, fit: BoxFit.cover)
                     : CachedNetworkImage(
                         imageUrl: existingUrl!,
                         fit: BoxFit.cover,
-                        placeholder: (context, url) => const Center(
-                          child: CircularProgressIndicator(),
-                        ),
-                        errorWidget: (context, url, error) => const Icon(Icons.error),
+                        placeholder: (context, url) =>
+                            const Center(child: CircularProgressIndicator()),
+                        errorWidget: (context, url, error) =>
+                            const Icon(Icons.error),
                       ),
               )
             : Column(
@@ -421,7 +452,9 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
             decoration: InputDecoration(
               labelText: 'First Name *',
               prefixIcon: const Icon(Icons.person_outline),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               filled: true,
               fillColor: Colors.grey.shade50,
             ),
@@ -439,7 +472,9 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
             decoration: InputDecoration(
               labelText: 'Last Name *',
               prefixIcon: const Icon(Icons.person),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               filled: true,
               fillColor: Colors.grey.shade50,
             ),
@@ -457,7 +492,9 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
             decoration: InputDecoration(
               labelText: 'Phone Number *',
               prefixIcon: const Icon(Icons.phone),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               filled: true,
               fillColor: Colors.grey.shade50,
               helperText: 'Format: 09XXXXXXXXX',
@@ -544,10 +581,7 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
         ),
         Text(
           label,
-          style: TextStyle(
-            color: Colors.white.withOpacity(0.9),
-            fontSize: 12,
-          ),
+          style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 12),
         ),
       ],
     );
@@ -572,12 +606,16 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
               labelText: 'Vehicle Model *',
               hintText: 'e.g., Honda Click 150i',
               prefixIcon: const Icon(Icons.motorcycle),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               filled: true,
               fillColor: Colors.grey.shade50,
             ),
             validator: (value) {
-              if (value != null && value.trim().isNotEmpty && !ValidationUtils.isValidVehicleModel(value.trim())) {
+              if (value != null &&
+                  value.trim().isNotEmpty &&
+                  !ValidationUtils.isValidVehicleModel(value.trim())) {
                 return 'Please enter a valid vehicle model';
               }
               return null;
@@ -591,26 +629,34 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
               labelText: 'License Plate Number *',
               hintText: 'e.g., ABC-1234',
               prefixIcon: const Icon(Icons.pin),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               filled: true,
               fillColor: Colors.grey.shade50,
               helperText: 'Format: XXX-#### or XX-####',
             ),
             textCapitalization: TextCapitalization.characters,
             validator: (value) {
-              if (value != null && value.trim().isNotEmpty && !ValidationUtils.isValidPlateNumber(value.trim())) {
+              if (value != null &&
+                  value.trim().isNotEmpty &&
+                  !ValidationUtils.isValidPlateNumber(value.trim())) {
                 return 'Please enter a valid license plate format';
               }
               return null;
             },
             onChanged: (value) {
-              if (value.isNotEmpty && ValidationUtils.isValidPlateNumber(value)) {
+              if (value.isNotEmpty &&
+                  ValidationUtils.isValidPlateNumber(value)) {
                 final formatted = ValidationUtils.formatPlateNumber(value);
                 if (formatted != value) {
-                  _plateNumberController.value = _plateNumberController.value.copyWith(
-                    text: formatted,
-                    selection: TextSelection.collapsed(offset: formatted.length),
-                  );
+                  _plateNumberController.value = _plateNumberController.value
+                      .copyWith(
+                        text: formatted,
+                        selection: TextSelection.collapsed(
+                          offset: formatted.length,
+                        ),
+                      );
                 }
               }
             },
@@ -685,7 +731,9 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
               labelText: 'LTFRB Number (optional)',
               hintText: 'e.g., 2024-NCR-12345',
               prefixIcon: const Icon(Icons.badge),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               filled: true,
               fillColor: Colors.grey.shade50,
             ),
@@ -764,11 +812,13 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
                         ),
                       )
                     : (_validatedBusinessName != null
-                        ? const Icon(Icons.check_circle, color: Colors.green)
-                        : (_invitationCodeController.text.trim().isNotEmpty
-                            ? const Icon(Icons.error, color: Colors.red)
-                            : null)),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          ? const Icon(Icons.check_circle, color: Colors.green)
+                          : (_invitationCodeController.text.trim().isNotEmpty
+                                ? const Icon(Icons.error, color: Colors.red)
+                                : null)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 filled: true,
                 fillColor: Colors.grey.shade50,
               ),
@@ -794,7 +844,11 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.check_circle, color: Colors.green.shade700, size: 20),
+                    Icon(
+                      Icons.check_circle,
+                      color: Colors.green.shade700,
+                      size: 20,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -808,7 +862,8 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
                   ],
                 ),
               )
-            else if (_invitationCodeController.text.trim().isNotEmpty && !_isValidatingCode)
+            else if (_invitationCodeController.text.trim().isNotEmpty &&
+                !_isValidatingCode)
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -842,10 +897,7 @@ class _ImprovedEditProfileScreenState extends State<ImprovedEditProfileScreen> w
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Scaffold(
-        appBar: AppBar(
-          title: const Text('Edit Profile'),
-          elevation: 0,
-        ),
+        appBar: AppBar(title: const Text('Edit Profile'), elevation: 0),
         body: const Center(child: CircularProgressIndicator()),
       );
     }

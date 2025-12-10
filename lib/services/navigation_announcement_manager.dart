@@ -3,7 +3,7 @@ import 'navigation_service.dart';
 import 'voice_guidance_service.dart';
 
 /// Manages when and what navigation announcements should be spoken
-/// 
+///
 /// Features:
 /// - Distance-based announcement thresholds
 /// - Prevents duplicate announcements
@@ -11,18 +11,17 @@ import 'voice_guidance_service.dart';
 /// - Handles multi-language announcement formatting
 class NavigationAnnouncementManager {
   final VoiceGuidanceService _voiceService = VoiceGuidanceService();
-  
+
   // Track announced instructions to prevent duplicates
   final Set<String> _announcedInstructions = {};
-  
+
   // Distance thresholds for announcements (in meters)
+  // Optimized for urban driving (less chatty, more timely)
   static const List<double> distanceThresholds = [
-    1000.0, // 1 km
-    500.0,  // 500 m
-    200.0,  // 200 m
-    100.0,  // 100 m
-    50.0,   // 50 m
-    20.0,   // 20 m - Final warning
+    1000.0, // 1 km - Heads up
+    400.0, // 400 m - Get ready
+    150.0, // 150 m - Get in lane
+    40.0, // 40 m - Execute now
   ];
 
   /// Initialize the announcement manager
@@ -31,36 +30,39 @@ class NavigationAnnouncementManager {
   }
 
   /// Process a navigation instruction and determine if it should be announced
-  /// 
+  ///
   /// [instruction] - The current navigation instruction
   /// [distanceToStep] - Distance remaining to this step in meters
+  /// [nextInstruction] - The next instruction (optional, for compound turns)
   Future<void> processInstruction(
     NavigationInstruction instruction,
-    double distanceToStep,
-  ) async {
+    double distanceToStep, {
+    NavigationInstruction? nextInstruction,
+  }) async {
     // Find the appropriate threshold for this distance
     final threshold = _getAnnouncementThreshold(distanceToStep);
-    
+
     if (threshold == null) return; // Too far or too close
-    
+
     // Create unique key for this instruction at this threshold
     final key = '${instruction.instruction}_$threshold';
-    
+
     // Check if we've already announced this
     if (_announcedInstructions.contains(key)) return;
-    
+
     // Mark as announced
     _announcedInstructions.add(key);
-    
+
     // Format and speak the announcement
     final announcement = _formatAnnouncement(
       instruction,
       distanceToStep,
       threshold,
+      nextInstruction: nextInstruction,
     );
-    
+
     await _voiceService.speak(announcement);
-    
+
     developer.log(
       'Announced: $announcement (distance: ${distanceToStep.toStringAsFixed(0)}m)',
       name: 'NavigationAnnouncementManager',
@@ -83,39 +85,83 @@ class NavigationAnnouncementManager {
   String _formatAnnouncement(
     NavigationInstruction instruction,
     double distance,
-    double threshold,
-  ) {
+    double threshold, {
+    NavigationInstruction? nextInstruction,
+  }) {
     final language = _voiceService.currentLanguage;
-    
+
     // Format distance
     final distanceText = _formatDistance(distance, language);
-    
+
     // Get the instruction text
     final instructionText = instruction.instruction;
-    
+
     // Combine into announcement
     if (language.startsWith('fil')) {
       // Filipino
-      return _formatFilipinoAnnouncement(distanceText, instructionText, distance);
+      return _formatFilipinoAnnouncement(
+        distanceText,
+        instructionText,
+        distance,
+      );
     } else {
       // English (default)
-      return _formatEnglishAnnouncement(distanceText, instructionText, distance);
+      return _formatEnglishAnnouncement(
+        distanceText,
+        instructionText,
+        distance,
+        nextInstruction: nextInstruction,
+      );
     }
   }
 
-  /// Format announcement in English
+  /// Format announcement in English with Waze-like natural phrasing
   String _formatEnglishAnnouncement(
     String distanceText,
     String instruction,
-    double distance,
-  ) {
+    double distance, {
+    NavigationInstruction? nextInstruction,
+  }) {
+    // Clean up instruction text (remove "Turn" if redundant, etc.)
+    String cleanInstruction = instruction;
+
+    // 1. Immediate Action (< 50m)
     if (distance <= 50) {
-      // Immediate instruction
-      return instruction;
-    } else {
-      // Distance-based instruction
-      return 'In $distanceText, $instruction';
+      String announcement = cleanInstruction;
+
+      // Add "Now" for urgency
+      if (!announcement.toLowerCase().contains('now')) {
+        announcement += ' now';
+      }
+
+      // Check for compound turn (if next turn is within 200m)
+      if (nextInstruction != null && nextInstruction.distance < 200) {
+        final nextAction = _simplifyInstruction(nextInstruction.instruction);
+        announcement += ', then $nextAction';
+      }
+
+      return announcement;
     }
+    // 2. Short Distance (< 200m)
+    else if (distance <= 200) {
+      return 'In $distanceText, $cleanInstruction';
+    }
+    // 3. Medium/Long Distance
+    else {
+      // For longer distances, put distance first for clarity
+      return 'In $distanceText, $cleanInstruction';
+    }
+  }
+
+  /// Simplify instruction for compound phrases (e.g., "Turn right onto Main St" -> "turn right")
+  String _simplifyInstruction(String instruction) {
+    final lower = instruction.toLowerCase();
+    if (lower.contains('turn right')) return 'turn right';
+    if (lower.contains('turn left')) return 'turn left';
+    if (lower.contains('keep right')) return 'keep right';
+    if (lower.contains('keep left')) return 'keep left';
+    if (lower.contains('u-turn')) return 'make a u-turn';
+    return instruction;
   }
 
   /// Format announcement in Filipino
@@ -159,12 +205,12 @@ class NavigationAnnouncementManager {
   /// Announce arrival at destination
   Future<void> announceArrival() async {
     _clearAnnouncements(); // Clear old announcements
-    
+
     final language = _voiceService.currentLanguage;
     final announcement = language.startsWith('fil')
         ? 'Nandito na kayo sa inyong destinasyon'
         : 'You have arrived at your destination';
-    
+
     await _voiceService.speak(announcement, priority: true);
   }
 
@@ -172,11 +218,11 @@ class NavigationAnnouncementManager {
   Future<void> announceNavigationStart(double totalDistance) async {
     final language = _voiceService.currentLanguage;
     final distanceText = _formatDistance(totalDistance, language);
-    
+
     final announcement = language.startsWith('fil')
         ? 'Nagsisimula ang navigation. Kabuuang distansya: $distanceText'
         : 'Navigation started. Total distance: $distanceText';
-    
+
     await _voiceService.speak(announcement, priority: true);
   }
 
@@ -186,30 +232,43 @@ class NavigationAnnouncementManager {
     final announcement = language.startsWith('fil')
         ? 'Muling kinakalkula ang ruta'
         : 'Recalculating route';
-    
+
     await _voiceService.speak(announcement, priority: true);
   }
 
   /// Clear all announcement history (useful when starting new navigation)
   void _clearAnnouncements() {
     _announcedInstructions.clear();
-    developer.log('Cleared announcement history', 
-      name: 'NavigationAnnouncementManager');
+    developer.log(
+      'Cleared announcement history',
+      name: 'NavigationAnnouncementManager',
+    );
   }
-  
+
   /// 🆕 Clear announcements for new instruction (keeps old ones to prevent repeats)
   void clearAnnouncementsForNewInstruction() {
     _announcedInstructions.clear();
-    developer.log('Cleared announcements for new instruction', 
-      name: 'NavigationAnnouncementManager');
+    developer.log(
+      'Cleared announcements for new instruction',
+      name: 'NavigationAnnouncementManager',
+    );
   }
-  
+
   /// 🆕 Immediately announce a new instruction (used when advancing to next instruction)
-  Future<void> announceImmediateInstruction(NavigationInstruction instruction) async {
+  Future<void> announceImmediateInstruction(
+    NavigationInstruction instruction,
+  ) async {
     final announcement = instruction.instruction;
     await _voiceService.speak(announcement, priority: true);
-    developer.log('Immediately announced: $announcement', 
-      name: 'NavigationAnnouncementManager');
+    developer.log(
+      'Immediately announced: $announcement',
+      name: 'NavigationAnnouncementManager',
+    );
+  }
+
+  /// Speak an arbitrary message
+  Future<void> speak(String message) async {
+    await _voiceService.speak(message, priority: true);
   }
 
   /// Reset the announcement manager (e.g., when navigation ends)

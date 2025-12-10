@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/supabase_config.dart';
@@ -36,16 +37,27 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
   Future<void> _checkDriverVerification(AuthState authState) async {
     if (authState.session != null) {
+      // Don't block UI - run verification in background
       _authStateManager.setLoading(true);
-      try {
-        final isDriver = await _authService.isCurrentUserDriver();
-        _authStateManager.setDriverVerified(isDriver);
-        _authStateManager.clearError();
-      } catch (e) {
-        _authStateManager.setError('Failed to verify driver status: $e');
-      } finally {
-        _authStateManager.setLoading(false);
-      }
+
+      // Use microtask to avoid blocking current frame
+      scheduleMicrotask(() async {
+        try {
+          final isDriver = await _authService.isCurrentUserDriver();
+          if (mounted) {
+            _authStateManager.setDriverVerified(isDriver);
+            _authStateManager.clearError();
+          }
+        } catch (e) {
+          if (mounted) {
+            _authStateManager.setError('Failed to verify driver status: $e');
+          }
+        } finally {
+          if (mounted) {
+            _authStateManager.setLoading(false);
+          }
+        }
+      });
     } else {
       _authStateManager.setDriverVerified(false);
     }
@@ -80,7 +92,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
           // Check if user is logged in
           final session = authState.session;
-          
+
           if (session != null) {
             if (isDriverVerified) {
               // User is a verified driver, show main app
@@ -105,16 +117,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CircularProgressIndicator(
-              color: SwiftDashColors.darkBlue,
-            ),
+            CircularProgressIndicator(color: SwiftDashColors.darkBlue),
             SizedBox(height: 16),
             Text(
               'Checking authentication...',
-              style: TextStyle(
-                color: SwiftDashColors.textGrey,
-                fontSize: 16,
-              ),
+              style: TextStyle(color: SwiftDashColors.textGrey, fontSize: 16),
             ),
           ],
         ),
@@ -189,7 +196,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
       ),
     );
   }
-  
+
   Widget _buildNotDriverScreen() {
     return Scaffold(
       backgroundColor: SwiftDashColors.backgroundGrey,
@@ -235,7 +242,10 @@ class _AuthWrapperState extends State<AuthWrapper> {
                           return Container(
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
-                                colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
+                                colors: [
+                                  SwiftDashColors.darkBlue,
+                                  SwiftDashColors.lightBlue,
+                                ],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               ),
@@ -266,10 +276,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
                     const SizedBox(height: 24),
                     Text(
                       'Access Denied',
-                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        color: SwiftDashColors.darkBlue,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(
+                            color: SwiftDashColors.darkBlue,
+                            fontWeight: FontWeight.bold,
+                          ),
                     ),
                     const SizedBox(height: 16),
                     Text(
@@ -285,53 +296,62 @@ class _AuthWrapperState extends State<AuthWrapper> {
                       height: 50,
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [SwiftDashColors.dangerRed, SwiftDashColors.dangerRed.withOpacity(0.8)],
+                          colors: [
+                            SwiftDashColors.dangerRed,
+                            SwiftDashColors.dangerRed.withOpacity(0.8),
+                          ],
                           begin: Alignment.centerLeft,
                           end: Alignment.centerRight,
                         ),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: ElevatedButton(
-                        onPressed: _authStateManager.isLoading ? null : () async {
-                          _authStateManager.setLoading(true);
-                          try {
-                            // Show loading indicator
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Signing out...'),
-                                duration: Duration(seconds: 2),
-                              ),
-                            );
-                            
-                            await _authService.signOut();
-                            
-                            // Show success message
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('✅ Signed out successfully'),
-                                  backgroundColor: Colors.green,
-                                  duration: Duration(seconds: 2),
-                                ),
-                              );
-                            }
-                          } catch (e) {
-                            // Show error message but still try to navigate
-                            _authStateManager.setError('Sign out failed: $e');
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('⚠️ Sign out error: $e'),
-                                  backgroundColor: Colors.orange,
-                                  duration: const Duration(seconds: 3),
-                                ),
-                              );
-                            }
-                            print('Sign out error: $e');
-                          } finally {
-                            _authStateManager.setLoading(false);
-                          }
-                        },
+                        onPressed: _authStateManager.isLoading
+                            ? null
+                            : () async {
+                                _authStateManager.setLoading(true);
+                                try {
+                                  // Show loading indicator
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Signing out...'),
+                                      duration: Duration(seconds: 2),
+                                    ),
+                                  );
+
+                                  await _authService.signOut();
+
+                                  // Show success message
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          '✅ Signed out successfully',
+                                        ),
+                                        backgroundColor: Colors.green,
+                                        duration: Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                } catch (e) {
+                                  // Show error message but still try to navigate
+                                  _authStateManager.setError(
+                                    'Sign out failed: $e',
+                                  );
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('⚠️ Sign out error: $e'),
+                                        backgroundColor: Colors.orange,
+                                        duration: const Duration(seconds: 3),
+                                      ),
+                                    );
+                                  }
+                                  print('Sign out error: $e');
+                                } finally {
+                                  _authStateManager.setLoading(false);
+                                }
+                              },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.transparent,
                           shadowColor: Colors.transparent,
@@ -341,16 +361,17 @@ class _AuthWrapperState extends State<AuthWrapper> {
                         ),
                         child: Text(
                           'Sign Out',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: SwiftDashColors.white,
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(
+                                color: SwiftDashColors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
                         ),
                       ),
                     ),
-                    
+
                     const SizedBox(height: 12),
-                    
+
                     // Force Sign Out Button (Emergency)
                     Container(
                       width: double.infinity,
@@ -363,42 +384,50 @@ class _AuthWrapperState extends State<AuthWrapper> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: ElevatedButton(
-                        onPressed: _authStateManager.isLoading ? null : () async {
-                          _authStateManager.setLoading(true);
-                          try {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Force signing out...'),
-                                duration: Duration(seconds: 1),
-                              ),
-                            );
-                            
-                            await _authService.forceSignOut();
-                            
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('✅ Force sign out successful'),
-                                  backgroundColor: Colors.green,
-                                  duration: Duration(seconds: 2),
-                                ),
-                              );
-                            }
-                          } catch (e) {
-                            _authStateManager.setError('Force sign out failed: $e');
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('❌ Force sign out failed: $e'),
-                                  backgroundColor: Colors.red,
-                                  duration: const Duration(seconds: 3),
-                                ),
-                              );
-                            }
-                          } finally {
-                            _authStateManager.setLoading(false);
-                          }
-                        },
+                        onPressed: _authStateManager.isLoading
+                            ? null
+                            : () async {
+                                _authStateManager.setLoading(true);
+                                try {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Force signing out...'),
+                                      duration: Duration(seconds: 1),
+                                    ),
+                                  );
+
+                                  await _authService.forceSignOut();
+
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          '✅ Force sign out successful',
+                                        ),
+                                        backgroundColor: Colors.green,
+                                        duration: Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                } catch (e) {
+                                  _authStateManager.setError(
+                                    'Force sign out failed: $e',
+                                  );
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          '❌ Force sign out failed: $e',
+                                        ),
+                                        backgroundColor: Colors.red,
+                                        duration: const Duration(seconds: 3),
+                                      ),
+                                    );
+                                  }
+                                } finally {
+                                  _authStateManager.setLoading(false);
+                                }
+                              },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.transparent,
                           shadowColor: Colors.transparent,
@@ -408,10 +437,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
                         ),
                         child: Text(
                           'Force Sign Out',
-                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            color: SwiftDashColors.white,
-                            fontWeight: FontWeight.w500,
-                          ),
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                color: SwiftDashColors.white,
+                                fontWeight: FontWeight.w500,
+                              ),
                         ),
                       ),
                     ),

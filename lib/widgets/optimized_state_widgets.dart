@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/optimized_state_manager.dart';
 
@@ -41,6 +42,9 @@ class MultiValueListenable extends StatefulWidget {
 }
 
 class _MultiValueListenableState extends State<MultiValueListenable> {
+  Timer? _debounceTimer;
+  static const _debounceDuration = Duration(milliseconds: 50);
+
   @override
   void initState() {
     super.initState();
@@ -52,12 +56,12 @@ class _MultiValueListenableState extends State<MultiValueListenable> {
   @override
   void didUpdateWidget(MultiValueListenable oldWidget) {
     super.didUpdateWidget(oldWidget);
-    
+
     // Remove listeners from old notifiers
     for (final notifier in oldWidget.notifiers) {
       notifier.removeListener(_onValueChanged);
     }
-    
+
     // Add listeners to new notifiers
     for (final notifier in widget.notifiers) {
       notifier.addListener(_onValueChanged);
@@ -66,6 +70,7 @@ class _MultiValueListenableState extends State<MultiValueListenable> {
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     for (final notifier in widget.notifiers) {
       notifier.removeListener(_onValueChanged);
     }
@@ -73,11 +78,15 @@ class _MultiValueListenableState extends State<MultiValueListenable> {
   }
 
   void _onValueChanged() {
-    if (mounted) {
-      setState(() {
-        // Trigger rebuild when any notifier changes
-      });
-    }
+    // Debounce rapid changes to prevent excessive rebuilds
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(_debounceDuration, () {
+      if (mounted) {
+        setState(() {
+          // Trigger rebuild when any notifier changes
+        });
+      }
+    });
   }
 
   @override
@@ -89,7 +98,7 @@ class _MultiValueListenableState extends State<MultiValueListenable> {
 /// Enhanced driver status widget using optimized state management
 class OptimizedDriverStatusWidget extends StatelessWidget {
   final bool showOfflineMessage;
-  
+
   const OptimizedDriverStatusWidget({
     super.key,
     this.showOfflineMessage = true,
@@ -105,7 +114,7 @@ class OptimizedDriverStatusWidget extends StatelessWidget {
       ],
       builder: (context) {
         final driverState = DriverStateManager.instance;
-        
+
         if (driverState.isLoading) {
           return const Card(
             child: Padding(
@@ -147,7 +156,9 @@ class OptimizedDriverStatusWidget extends StatelessWidget {
         }
 
         return Card(
-          color: driverState.isOnline ? Colors.green.shade50 : Colors.grey.shade50,
+          color: driverState.isOnline
+              ? Colors.green.shade50
+              : Colors.grey.shade50,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Row(
@@ -167,9 +178,13 @@ class OptimizedDriverStatusWidget extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        driverState.isOnline ? 'Online - Available for deliveries' : 'Offline',
+                        driverState.isOnline
+                            ? 'Online - Available for deliveries'
+                            : 'Offline',
                         style: TextStyle(
-                          color: driverState.isOnline ? Colors.green.shade700 : Colors.grey.shade700,
+                          color: driverState.isOnline
+                              ? Colors.green.shade700
+                              : Colors.grey.shade700,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -209,9 +224,9 @@ class DeliveryOffersCounter extends StatelessWidget {
       notifier: DeliveryStateManager.instance.availableOffersNotifier,
       builder: (context, offers, child) {
         final count = offers.length;
-        
+
         if (count == 0) return const SizedBox.shrink();
-        
+
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
@@ -235,11 +250,8 @@ class DeliveryOffersCounter extends StatelessWidget {
 /// Loading overlay widget using state management
 class OptimizedLoadingOverlay extends StatelessWidget {
   final Widget child;
-  
-  const OptimizedLoadingOverlay({
-    super.key,
-    required this.child,
-  });
+
+  const OptimizedLoadingOverlay({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -249,9 +261,10 @@ class OptimizedLoadingOverlay extends StatelessWidget {
         DeliveryStateManager.instance.isLoadingNotifier,
       ],
       builder: (context) {
-        final isLoading = DriverStateManager.instance.isLoading || 
-                         DeliveryStateManager.instance.isLoading;
-        
+        final isLoading =
+            DriverStateManager.instance.isLoading ||
+            DeliveryStateManager.instance.isLoading;
+
         return Stack(
           children: [
             child,

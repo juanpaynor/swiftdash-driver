@@ -8,8 +8,7 @@ import 'screens/auth_wrapper.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/main_map_screen.dart';
-// 🧹 RAM OPTIMIZATION: BackgroundLocationService disabled to save ~40MB
-// import 'services/background_location_service.dart';
+import 'services/background_location_service.dart';
 import 'screens/delivery_debug_screen.dart';
 import 'screens/debug_vehicle_types_screen.dart';
 import 'services/auth_service.dart';
@@ -28,7 +27,7 @@ import 'services/delivery_offer_notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Load environment variables
   try {
     await dotenv.load(fileName: ".env");
@@ -37,19 +36,18 @@ void main() async {
     print('⚠️ Failed to load .env file: $e');
     print('⚠️ Ably features will not be available');
   }
-  
+
   // Initialize Supabase
   await Supabase.initialize(
     url: SupabaseConfig.supabaseUrl,
     anonKey: SupabaseConfig.supabaseAnonKey,
   );
-  
+
   // Initialize Mapbox
   MapboxOptions.setAccessToken(MapboxConfig.accessToken);
-  
+
   runApp(const MyApp());
-  
-  
+
   WidgetsBinding.instance.addPostFrameCallback((_) {
     _initializeServicesInBackground();
   });
@@ -59,13 +57,13 @@ void main() async {
 Future<void> _initializeServicesInBackground() async {
   // Initialize Ably (if API key available) - non-blocking
   _initAbly();
-  
-  // Initialize state managers - non-blocking  
+
+  // Initialize state managers - non-blocking
   _initStateManagers();
-  
+
   // Check device compatibility and initialize background service - non-blocking
   _initBackgroundServices();
-  
+
   // Initialize delivery offer notification service - non-blocking
   _initDeliveryOfferNotifications();
 }
@@ -76,7 +74,7 @@ void _initAbly() {
   // Don't initialize Ably on startup - it will connect when driver goes online
   // This saves 1-2 seconds of startup time and prevents network blocking
   print('⏭️ Ably initialization deferred until driver goes online');
-  
+
   // Just validate the API key is available
   final ablyKey = dotenv.env['ABLY_CLIENT_KEY'];
   if (ablyKey == null || ablyKey.isEmpty) {
@@ -105,19 +103,25 @@ void _initBackgroundServices() {
       print('🔍 Checking device compatibility...');
       final deviceCompatibility = DeviceCompatibilityService.instance;
       final isCompatible = await deviceCompatibility.checkDeviceCompatibility();
-      
+
       if (isCompatible) {
-        // 🧹 RAM OPTIMIZATION: BackgroundLocationService disabled (~40MB saved)
-        // Using OptimizedLocationService instead which handles location tracking more efficiently
-        print('✅ Device compatible - using OptimizedLocationService for location tracking');
-        print('💾 RAM saved: ~40MB (BackgroundLocationService disabled)');
-        
-        // NOTE: If you need background location when app is minimized, re-enable below:
-        // await BackgroundLocationService.initializeService();
+        // ✅ Background service enabled for delivery continuity
+        print('✅ Device compatible - initializing background location service');
+        try {
+          await BackgroundLocationService.initializeService();
+          print(
+            '✅ Background service initialized - app will run in background',
+          );
+        } catch (e) {
+          print('⚠️ Background service initialization failed: $e');
+          print('🔄 Falling back to OptimizedLocationService');
+        }
       } else {
         print('⚠️ Device has compatibility issues with background services');
         print('📱 Device info: ${deviceCompatibility.deviceInfo}');
-        print('🔄 App will use fallback location strategy: ${deviceCompatibility.getFallbackStrategy()}');
+        print(
+          '🔄 App will use fallback location strategy: ${deviceCompatibility.getFallbackStrategy()}',
+        );
       }
     } catch (e) {
       print('❌ Background service check failed: $e');
@@ -184,9 +188,7 @@ class MyApp extends StatelessWidget {
           margin: EdgeInsets.all(8),
         ),
       ),
-      home: const AppLifecycleManager(
-        child: AuthWrapper(),
-      ),
+      home: const AppLifecycleManager(child: AuthWrapper()),
       routes: {
         '/login': (context) => const LoginScreen(),
         '/signup': (context) => const SignupScreen(),
@@ -238,19 +240,19 @@ class _DriverDashboardState extends State<DriverDashboard> {
 
   Future<void> _toggleOnlineStatus() async {
     if (currentDriver == null || _isUpdatingStatus) return;
-    
+
     setState(() => _isUpdatingStatus = true);
-    
+
     try {
       final newStatus = !isOnline;
-      
+
       bool success;
       if (newStatus) {
         success = await _driverFlow.goOnline(context);
       } else {
         success = await _driverFlow.goOffline(context);
       }
-      
+
       if (success) {
         setState(() {
           isOnline = newStatus;
@@ -282,9 +284,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
             ],
           ),
         ),
-        body: const Center(
-          child: CircularProgressIndicator(),
-        ),
+        body: const Center(child: CircularProgressIndicator()),
       );
     }
 
@@ -371,7 +371,10 @@ class _DriverDashboardState extends State<DriverDashboard> {
                             height: 50,
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
-                                colors: [SwiftDashColors.darkBlue, SwiftDashColors.lightBlue],
+                                colors: [
+                                  SwiftDashColors.darkBlue,
+                                  SwiftDashColors.lightBlue,
+                                ],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               ),
@@ -390,30 +393,36 @@ class _DriverDashboardState extends State<DriverDashboard> {
                               children: [
                                 Text(
                                   'Welcome back, ${currentDriver!.firstName}!',
-                                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.bold,
-                                    color: SwiftDashColors.darkBlue,
-                                  ),
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: SwiftDashColors.darkBlue,
+                                      ),
                                 ),
                                 Text(
-                                  currentDriver!.isVerified 
-                                    ? 'Verified Driver' 
-                                    : 'Pending Verification',
-                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                    color: currentDriver!.isVerified 
-                                      ? SwiftDashColors.successGreen 
-                                      : SwiftDashColors.warningOrange,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                                  currentDriver!.isVerified
+                                      ? 'Verified Driver'
+                                      : 'Pending Verification',
+                                  style: Theme.of(context).textTheme.bodySmall
+                                      ?.copyWith(
+                                        color: currentDriver!.isVerified
+                                            ? SwiftDashColors.successGreen
+                                            : SwiftDashColors.warningOrange,
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                 ),
                               ],
                             ),
                           ),
                           if (!currentDriver!.isVerified)
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
                               decoration: BoxDecoration(
-                                color: SwiftDashColors.warningOrange.withOpacity(0.1),
+                                color: SwiftDashColors.warningOrange
+                                    .withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Text(
@@ -427,19 +436,24 @@ class _DriverDashboardState extends State<DriverDashboard> {
                             ),
                         ],
                       ),
-                      if (currentDriver!.vehicleModel != null || currentDriver!.vehicleTypeId != null) ...[
+                      if (currentDriver!.vehicleModel != null ||
+                          currentDriver!.vehicleTypeId != null) ...[
                         const SizedBox(height: 16),
                         const Divider(),
                         const SizedBox(height: 12),
                         Row(
                           children: [
-                            Icon(Icons.directions_car, color: SwiftDashColors.lightBlue, size: 20),
+                            Icon(
+                              Icons.directions_car,
+                              color: SwiftDashColors.lightBlue,
+                              size: 20,
+                            ),
                             const SizedBox(width: 8),
                             Text(
-                              currentDriver!.vehicleModel ?? 'Vehicle registered',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w500,
-                              ),
+                              currentDriver!.vehicleModel ??
+                                  'Vehicle registered',
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.w500),
                             ),
                           ],
                         ),
@@ -448,9 +462,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
                   ),
                 ),
               ),
-            
+
             const SizedBox(height: 16),
-            
+
             // Online/Offline Toggle Card
             Card(
               child: Padding(
@@ -459,18 +473,27 @@ class _DriverDashboardState extends State<DriverDashboard> {
                   children: [
                     Text(
                       isOnline ? 'You\'re Online' : 'You\'re Offline',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        color: isOnline ? SwiftDashColors.successGreen : SwiftDashColors.textGrey,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(
+                            color: isOnline
+                                ? SwiftDashColors.successGreen
+                                : SwiftDashColors.textGrey,
+                            fontWeight: FontWeight.bold,
+                          ),
                     ),
                     const SizedBox(height: 16),
                     Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: isOnline 
-                            ? [SwiftDashColors.successGreen, SwiftDashColors.successGreen.withOpacity(0.8)]
-                            : [SwiftDashColors.textGrey, SwiftDashColors.textGrey.withOpacity(0.8)],
+                          colors: isOnline
+                              ? [
+                                  SwiftDashColors.successGreen,
+                                  SwiftDashColors.successGreen.withOpacity(0.8),
+                                ]
+                              : [
+                                  SwiftDashColors.textGrey,
+                                  SwiftDashColors.textGrey.withOpacity(0.8),
+                                ],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
@@ -483,14 +506,16 @@ class _DriverDashboardState extends State<DriverDashboard> {
                         },
                         activeColor: SwiftDashColors.white,
                         inactiveThumbColor: SwiftDashColors.white,
-                        trackColor: MaterialStateProperty.all(Colors.transparent),
+                        trackColor: MaterialStateProperty.all(
+                          Colors.transparent,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      isOnline 
-                        ? 'Available for deliveries'
-                        : 'Tap to go online and start earning',
+                      isOnline
+                          ? 'Available for deliveries'
+                          : 'Tap to go online and start earning',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: SwiftDashColors.textGrey,
                       ),
@@ -504,16 +529,19 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 ),
               ),
             ),
-            
+
             const SizedBox(height: 16),
-            
+
             // Active Delivery Card (if exists)
             if (_driverFlow.hasActiveDelivery) ...[
               Card(
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [SwiftDashColors.successGreen, SwiftDashColors.successGreen.withOpacity(0.8)],
+                      colors: [
+                        SwiftDashColors.successGreen,
+                        SwiftDashColors.successGreen.withOpacity(0.8),
+                      ],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
@@ -555,9 +583,14 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                       ),
                                     ),
                                     Text(
-                                      _driverFlow.activeDelivery?.status.displayName ?? '',
+                                      _driverFlow
+                                              .activeDelivery
+                                              ?.status
+                                              .displayName ??
+                                          '',
                                       style: TextStyle(
-                                        color: SwiftDashColors.white.withOpacity(0.9),
+                                        color: SwiftDashColors.white
+                                            .withOpacity(0.9),
                                         fontSize: 14,
                                       ),
                                     ),
@@ -573,7 +606,10 @@ class _DriverDashboardState extends State<DriverDashboard> {
                           ),
                           const SizedBox(height: 12),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
                             decoration: BoxDecoration(
                               color: SwiftDashColors.white.withOpacity(0.2),
                               borderRadius: BorderRadius.circular(20),
@@ -595,7 +631,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
               ),
               const SizedBox(height: 16),
             ],
-            
+
             // Delivery Actions
             Row(
               children: [
@@ -605,7 +641,8 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       onTap: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (context) => const ImprovedDeliveryOffersScreen(),
+                            builder: (context) =>
+                                const ImprovedDeliveryOffersScreen(),
                           ),
                         );
                       },
@@ -619,7 +656,10 @@ class _DriverDashboardState extends State<DriverDashboard> {
                               height: 48,
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
-                                  colors: [SwiftDashColors.lightBlue, SwiftDashColors.darkBlue],
+                                  colors: [
+                                    SwiftDashColors.lightBlue,
+                                    SwiftDashColors.darkBlue,
+                                  ],
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
                                 ),
@@ -634,18 +674,18 @@ class _DriverDashboardState extends State<DriverDashboard> {
                             const SizedBox(height: 12),
                             Text(
                               'Delivery Offers',
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: SwiftDashColors.darkBlue,
-                              ),
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: SwiftDashColors.darkBlue,
+                                  ),
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'View available deliveries',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: SwiftDashColors.textGrey,
-                              ),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: SwiftDashColors.textGrey),
                               textAlign: TextAlign.center,
                             ),
                           ],
@@ -660,9 +700,14 @@ class _DriverDashboardState extends State<DriverDashboard> {
                     onTap: () async {
                       // Show current position and offer to open in maps
                       try {
-                        final pos = await OptimizedLocationService().getCurrentPosition();
+                        final pos = await OptimizedLocationService()
+                            .getCurrentPosition();
                         if (pos == null) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location not available')));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Location not available'),
+                            ),
+                          );
                           return;
                         }
 
@@ -672,7 +717,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
                           context: context,
                           builder: (ctx) => AlertDialog(
                             title: const Text('Current Location'),
-                            content: Text('Lat: ${lat.toStringAsFixed(6)}, Lng: ${lng.toStringAsFixed(6)}'),
+                            content: Text(
+                              'Lat: ${lat.toStringAsFixed(6)}, Lng: ${lng.toStringAsFixed(6)}',
+                            ),
                             actions: [
                               TextButton(
                                 onPressed: () => Navigator.of(ctx).pop(),
@@ -682,13 +729,23 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                 onPressed: () async {
                                   // ✅ FIX: Try native Google Maps deeplink first, fallback to HTTPS
                                   try {
-                                    final nativeUri = Uri.parse('comgooglemaps://?q=$lat,$lng');
+                                    final nativeUri = Uri.parse(
+                                      'comgooglemaps://?q=$lat,$lng',
+                                    );
                                     if (await canLaunchUrl(nativeUri)) {
-                                      await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
+                                      await launchUrl(
+                                        nativeUri,
+                                        mode: LaunchMode.externalApplication,
+                                      );
                                     } else {
                                       // Fallback to HTTPS search URL
-                                      final webUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
-                                      await launchUrl(webUri, mode: LaunchMode.externalApplication);
+                                      final webUri = Uri.parse(
+                                        'https://www.google.com/maps/search/?api=1&query=$lat,$lng',
+                                      );
+                                      await launchUrl(
+                                        webUri,
+                                        mode: LaunchMode.externalApplication,
+                                      );
                                     }
                                   } catch (e) {
                                     print('❌ Error opening Google Maps: $e');
@@ -700,7 +757,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
                           ),
                         );
                       } catch (e) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to get location: $e')));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Failed to get location: $e')),
+                        );
                       }
                     },
                     child: Card(
@@ -713,7 +772,12 @@ class _DriverDashboardState extends State<DriverDashboard> {
                               height: 48,
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
-                                  colors: [SwiftDashColors.warningOrange, SwiftDashColors.warningOrange.withOpacity(0.8)],
+                                  colors: [
+                                    SwiftDashColors.warningOrange,
+                                    SwiftDashColors.warningOrange.withOpacity(
+                                      0.8,
+                                    ),
+                                  ],
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
                                 ),
@@ -728,18 +792,18 @@ class _DriverDashboardState extends State<DriverDashboard> {
                             const SizedBox(height: 12),
                             Text(
                               'My Location',
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: SwiftDashColors.darkBlue,
-                              ),
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                    color: SwiftDashColors.darkBlue,
+                                  ),
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'Update location',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: SwiftDashColors.textGrey,
-                              ),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: SwiftDashColors.textGrey),
                               textAlign: TextAlign.center,
                             ),
                           ],
@@ -750,9 +814,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 ),
               ],
             ),
-            
+
             const SizedBox(height: 16),
-            
+
             // Today's Earnings Card
             Card(
               child: Padding(
@@ -765,20 +829,23 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       children: [
                         Text(
                           'Today\'s Earnings',
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
-                        Icon(Icons.trending_up, color: SwiftDashColors.successGreen),
+                        Icon(
+                          Icons.trending_up,
+                          color: SwiftDashColors.successGreen,
+                        ),
                       ],
                     ),
                     const SizedBox(height: 12),
                     Text(
                       '₱0.00', // TODO: Replace with real earnings data
-                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        color: SwiftDashColors.darkBlue,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: Theme.of(context).textTheme.headlineMedium
+                          ?.copyWith(
+                            color: SwiftDashColors.darkBlue,
+                            fontWeight: FontWeight.bold,
+                          ),
                     ),
                     const SizedBox(height: 8),
                     Text(
@@ -791,9 +858,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 ),
               ),
             ),
-            
+
             const SizedBox(height: 16),
-            
+
             // Quick Stats Row
             Row(
               children: [
@@ -803,19 +870,21 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       padding: const EdgeInsets.all(16),
                       child: Column(
                         children: [
-                          Icon(Icons.star, color: SwiftDashColors.warningOrange, size: 24),
+                          Icon(
+                            Icons.star,
+                            color: SwiftDashColors.warningOrange,
+                            size: 24,
+                          ),
                           const SizedBox(height: 8),
                           Text(
                             currentDriver?.rating.toStringAsFixed(1) ?? '0.0',
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(fontWeight: FontWeight.bold),
                           ),
                           Text(
                             'Rating',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: SwiftDashColors.textGrey,
-                            ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: SwiftDashColors.textGrey),
                           ),
                         ],
                       ),
@@ -828,19 +897,21 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       padding: const EdgeInsets.all(16),
                       child: Column(
                         children: [
-                          Icon(Icons.local_shipping, color: SwiftDashColors.lightBlue, size: 24),
+                          Icon(
+                            Icons.local_shipping,
+                            color: SwiftDashColors.lightBlue,
+                            size: 24,
+                          ),
                           const SizedBox(height: 8),
                           Text(
                             '${currentDriver?.totalDeliveries ?? 0}',
-                            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(fontWeight: FontWeight.bold),
                           ),
                           Text(
                             'Deliveries',
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: SwiftDashColors.textGrey,
-                            ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: SwiftDashColors.textGrey),
                           ),
                         ],
                       ),
@@ -849,9 +920,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 ),
               ],
             ),
-            
+
             const SizedBox(height: 16),
-            
+
             // Recent Activity
             Card(
               child: Padding(
@@ -878,16 +949,14 @@ class _DriverDashboardState extends State<DriverDashboard> {
                             const SizedBox(height: 12),
                             Text(
                               'No deliveries yet',
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: SwiftDashColors.textGrey,
-                              ),
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(color: SwiftDashColors.textGrey),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'Go online to start receiving delivery requests',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: SwiftDashColors.textGrey,
-                              ),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: SwiftDashColors.textGrey),
                               textAlign: TextAlign.center,
                             ),
                           ],

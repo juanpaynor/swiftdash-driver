@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' as mapbox;
+import '../utils/route_snapper.dart';
 import '../models/delivery.dart';
 import 'navigation_announcement_manager.dart';
 import 'navigation_foreground_service.dart';
@@ -16,30 +18,35 @@ class NavigationService extends ChangeNotifier {
   NavigationService._();
 
   // Voice guidance manager
-  final NavigationAnnouncementManager _announcementManager = NavigationAnnouncementManager();
-  
+  final NavigationAnnouncementManager _announcementManager =
+      NavigationAnnouncementManager();
+
   // Foreground service for background navigation
-  final NavigationForegroundService _foregroundService = NavigationForegroundService();
+  final NavigationForegroundService _foregroundService =
+      NavigationForegroundService();
   bool _backgroundNavigationEnabled = true;
 
   // Navigation state
   bool _isNavigating = false;
+  bool _isRerouting = false;
+  DateTime? _lastRerouteTime;
   NavigationRoute? _currentRoute;
   NavigationInstruction? _currentInstruction;
   List<NavigationInstruction> _instructions = [];
+  NavigationCoordinate? _snappedLocation;
   int _currentInstructionIndex = 0;
   double _distanceToNextInstruction = 0;
   double _estimatedTimeToArrival = 0;
   double _distanceRemaining = 0;
-  
+
   // Stream controllers for real-time updates
-  final StreamController<NavigationInstruction> _instructionController = 
+  final StreamController<NavigationInstruction> _instructionController =
       StreamController<NavigationInstruction>.broadcast();
-  final StreamController<NavigationProgress> _progressController = 
+  final StreamController<NavigationProgress> _progressController =
       StreamController<NavigationProgress>.broadcast();
-  final StreamController<NavigationEvent> _eventController = 
+  final StreamController<NavigationEvent> _eventController =
       StreamController<NavigationEvent>.broadcast();
-  
+
   // Getters
   bool get isNavigating => _isNavigating;
   NavigationRoute? get currentRoute => _currentRoute;
@@ -48,9 +55,11 @@ class NavigationService extends ChangeNotifier {
   double get distanceToNextInstruction => _distanceToNextInstruction;
   double get estimatedTimeToArrival => _estimatedTimeToArrival;
   double get distanceRemaining => _distanceRemaining;
-  
+  NavigationCoordinate? get snappedLocation => _snappedLocation;
+
   // Streams
-  Stream<NavigationInstruction> get instructionStream => _instructionController.stream;
+  Stream<NavigationInstruction> get instructionStream =>
+      _instructionController.stream;
   Stream<NavigationProgress> get progressStream => _progressController.stream;
   Stream<NavigationEvent> get eventStream => _eventController.stream;
 
@@ -62,9 +71,13 @@ class NavigationService extends ChangeNotifier {
     bool isPickupPhase = false,
   }) async {
     try {
-      final double targetLat = isPickupPhase ? delivery.pickupLatitude : delivery.deliveryLatitude;
-      final double targetLng = isPickupPhase ? delivery.pickupLongitude : delivery.deliveryLongitude;
-      
+      final double targetLat = isPickupPhase
+          ? delivery.pickupLatitude
+          : delivery.deliveryLatitude;
+      final double targetLng = isPickupPhase
+          ? delivery.pickupLongitude
+          : delivery.deliveryLongitude;
+
       return await startNavigation(
         startLat: currentLocation.latitude,
         startLng: currentLocation.longitude,
@@ -89,11 +102,13 @@ class NavigationService extends ChangeNotifier {
     String? deliveryId,
   }) async {
     try {
-      debugPrint('🧭 Starting navigation from ($startLat, $startLng) to ($endLat, $endLng)');
-      
+      debugPrint(
+        '🧭 Starting navigation from ($startLat, $startLng) to ($endLat, $endLng)',
+      );
+
       // Stop any current navigation
       await stopNavigation();
-      
+
       // Calculate route with turn-by-turn instructions
       final route = await calculateNavigationRoute(
         startLat: startLat,
@@ -101,12 +116,12 @@ class NavigationService extends ChangeNotifier {
         endLat: endLat,
         endLng: endLng,
       );
-      
+
       if (route == null) {
         debugPrint('❌ Failed to calculate navigation route');
         return false;
       }
-      
+
       // Initialize navigation state
       _currentRoute = route;
       _instructions = route.instructions;
@@ -115,10 +130,10 @@ class NavigationService extends ChangeNotifier {
       _distanceRemaining = route.totalDistance;
       _estimatedTimeToArrival = route.totalDuration;
       _isNavigating = true;
-      
+
       // Initialize voice guidance
       await _announcementManager.initialize();
-      
+
       // Start foreground service for background navigation
       if (_backgroundNavigationEnabled) {
         await _foregroundService.startService(
@@ -126,28 +141,30 @@ class NavigationService extends ChangeNotifier {
           address: null, // Could be enhanced with actual address
         );
       }
-      
+
       // Notify listeners
       notifyListeners();
-      
+
       // Send initial instruction
       if (_currentInstruction != null) {
         _instructionController.add(_currentInstruction!);
       }
-      
+
       // Send initial progress
       _progressController.add(_buildProgressUpdate());
-      
+
       // Fire navigation started event
-      _eventController.add(NavigationEvent(
-        type: NavigationEventType.navigationStarted,
-        context: context,
-        deliveryId: deliveryId,
-      ));
-      
+      _eventController.add(
+        NavigationEvent(
+          type: NavigationEventType.navigationStarted,
+          context: context,
+          deliveryId: deliveryId,
+        ),
+      );
+
       // Announce navigation start with voice
       await _announcementManager.announceNavigationStart(route.totalDistance);
-      
+
       debugPrint('✅ Navigation started successfully');
       return true;
     } catch (e) {
@@ -160,53 +177,103 @@ class NavigationService extends ChangeNotifier {
   /// Call this from your existing location service
   Future<void> updateLocation(Position location) async {
     if (!_isNavigating || _currentRoute == null) return;
-    
+
     try {
+      // 1. Snap to route
+      final rawPoint = mapbox.Point(
+        coordinates: mapbox.Position(location.longitude, location.latitude),
+      );
+
+      // Extract coordinates safely from GeoJSON
+      final List<dynamic> rawCoords = _currentRoute!.geometry['coordinates'];
+      final List<List<double>> routeGeometry = rawCoords.map((c) {
+        return (c as List).map((e) => (e as num).toDouble()).toList();
+      }).toList();
+
+      final snappedPoint = RouteSnapper.snapToRoute(rawPoint, routeGeometry);
+
+      // 2. Check for off-route
+      final offRouteDistance = RouteSnapper.calculateDistanceInMeters(
+        rawPoint,
+        snappedPoint,
+      );
+
+      if (offRouteDistance > 30 && !_isRerouting) {
+        // Debounce rerouting (e.g., max once every 5 seconds)
+        if (_lastRerouteTime == null ||
+            DateTime.now().difference(_lastRerouteTime!) >
+                const Duration(seconds: 5)) {
+          debugPrint(
+            '⚠️ Off-route detected (${offRouteDistance.toStringAsFixed(1)}m). Recalculating...',
+          );
+          _recalculateRoute(location.latitude, location.longitude);
+          return; // Stop processing this update until new route arrives
+        }
+      }
+
+      // Use snapped location for instruction logic
+      final effectiveLat = snappedPoint.coordinates.lat.toDouble();
+      final effectiveLng = snappedPoint.coordinates.lng.toDouble();
+
+      _snappedLocation = NavigationCoordinate(
+        latitude: effectiveLat,
+        longitude: effectiveLng,
+      );
+
       // Calculate distance to next instruction
       if (_currentInstruction != null) {
         final distanceToInstruction = Geolocator.distanceBetween(
-          location.latitude,
-          location.longitude,
+          effectiveLat,
+          effectiveLng,
           _currentInstruction!.coordinate.latitude,
           _currentInstruction!.coordinate.longitude,
         );
-        
+
         _distanceToNextInstruction = distanceToInstruction;
-        
+
+        // Get next instruction for compound announcements
+        NavigationInstruction? nextInstruction;
+        if (_currentInstructionIndex < _instructions.length - 1) {
+          nextInstruction = _instructions[_currentInstructionIndex + 1];
+        }
+
         // Process voice announcement for current instruction
         await _announcementManager.processInstruction(
           _currentInstruction!,
           distanceToInstruction,
+          nextInstruction: nextInstruction,
         );
-        
+
         // Check if we should advance to next instruction (within 20 meters)
-        if (distanceToInstruction < 20 && _currentInstructionIndex < _instructions.length - 1) {
+        if (distanceToInstruction < 20 &&
+            _currentInstructionIndex < _instructions.length - 1) {
           _advanceToNextInstruction();
         }
       }
-      
+
       // Calculate remaining distance to destination
       final distanceToDestination = Geolocator.distanceBetween(
-        location.latitude,
-        location.longitude,
+        effectiveLat,
+        effectiveLng,
         _currentRoute!.endPoint.latitude,
         _currentRoute!.endPoint.longitude,
       );
-      
+
       _distanceRemaining = distanceToDestination;
-      
+
       // Estimate time to arrival (assuming 50 km/h average speed)
-      _estimatedTimeToArrival = (distanceToDestination / 1000) / 50 * 60; // minutes
-      
+      _estimatedTimeToArrival =
+          (distanceToDestination / 1000) / 50 * 60; // minutes
+
       // Check if we've arrived (within 30 meters of destination)
       if (distanceToDestination < 30) {
         await _handleArrival();
         return;
       }
-      
+
       // Send progress update
       _progressController.add(_buildProgressUpdate());
-      
+
       // Update foreground notification
       if (_backgroundNavigationEnabled && _currentInstruction != null) {
         await _foregroundService.updateNotification(
@@ -215,19 +282,73 @@ class NavigationService extends ChangeNotifier {
           eta: _formatETA(_estimatedTimeToArrival),
         );
       }
-      
+
       // Notify listeners for UI updates
       notifyListeners();
-      
     } catch (e) {
       debugPrint('❌ Error updating navigation location: $e');
+    }
+  }
+
+  Future<void> _recalculateRoute(double currentLat, double currentLng) async {
+    if (_isRerouting || _currentRoute == null) return;
+
+    _isRerouting = true;
+    _lastRerouteTime = DateTime.now();
+
+    // Notify UI that we are rerouting
+    _eventController.add(
+      NavigationEvent(
+        type: NavigationEventType.routeRecalculated,
+        context: 'Rerouting...',
+      ),
+    );
+
+    try {
+      final endLat = _currentRoute!.endPoint.latitude;
+      final endLng = _currentRoute!.endPoint.longitude;
+
+      final newRoute = await calculateNavigationRoute(
+        startLat: currentLat,
+        startLng: currentLng,
+        endLat: endLat,
+        endLng: endLng,
+      );
+
+      if (newRoute != null) {
+        debugPrint('✅ Route recalculated successfully');
+        _currentRoute = newRoute;
+        _instructions = newRoute.instructions;
+        _currentInstructionIndex = 0;
+        _currentInstruction = _instructions.isNotEmpty
+            ? _instructions[0]
+            : null;
+        _distanceRemaining = newRoute.totalDistance;
+        _estimatedTimeToArrival = newRoute.totalDuration;
+
+        // Send new instruction immediately
+        if (_currentInstruction != null) {
+          _instructionController.add(_currentInstruction!);
+
+          // Announce new route
+          _announcementManager.speak(
+            'Rerouting. ${_currentInstruction!.instruction}',
+          );
+        }
+
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('❌ Error recalculating route: $e');
+    } finally {
+      _isRerouting = false;
     }
   }
 
   /// Stop current navigation
   Future<void> stopNavigation() async {
     if (!_isNavigating) return;
-    
+
     try {
       _isNavigating = false;
       _currentRoute = null;
@@ -237,18 +358,18 @@ class NavigationService extends ChangeNotifier {
       _distanceToNextInstruction = 0;
       _estimatedTimeToArrival = 0;
       _distanceRemaining = 0;
-      
+
       // Reset voice guidance
       await _announcementManager.reset();
-      
+
       // Stop foreground service
       await _foregroundService.stopService();
-      
+
       // Fire navigation stopped event
-      _eventController.add(NavigationEvent(
-        type: NavigationEventType.navigationStopped,
-      ));
-      
+      _eventController.add(
+        NavigationEvent(type: NavigationEventType.navigationStopped),
+      );
+
       notifyListeners();
       debugPrint('🛑 Navigation stopped');
     } catch (e) {
@@ -273,7 +394,7 @@ class NavigationService extends ChangeNotifier {
         endLat: endLat,
         endLng: endLng,
       );
-      
+
       return route;
     } catch (e) {
       debugPrint('❌ Error calculating navigation route: $e');
@@ -290,21 +411,23 @@ class NavigationService extends ChangeNotifier {
   }) async {
     try {
       // Use your existing Mapbox token with enhanced features
-      final accessToken = dotenv.env['MAPBOX_ACCESS_TOKEN'] ?? 
+      final accessToken =
+          dotenv.env['MAPBOX_ACCESS_TOKEN'] ??
           (throw Exception('❌ MAPBOX_ACCESS_TOKEN not found in .env file'));
-      
+
       // Enhanced Mapbox Directions API with turn-by-turn instructions
-      final url = 'https://api.mapbox.com/directions/v5/mapbox/driving'
+      final url =
+          'https://api.mapbox.com/directions/v5/mapbox/driving'
           '/$startLng,$startLat;$endLng,$endLat'
           '?access_token=$accessToken'
-          '&steps=true'                    // Turn-by-turn steps
-          '&voice_instructions=true'       // Voice-ready instructions  
-          '&banner_instructions=true'      // Visual instructions
+          '&steps=true' // Turn-by-turn steps
+          '&voice_instructions=true' // Voice-ready instructions
+          '&banner_instructions=true' // Visual instructions
           '&geometries=geojson'
           '&overview=full';
-      
+
       final response = await http.get(Uri.parse(url));
-      
+
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         return _parseMapboxNavigationResponse(data);
@@ -324,19 +447,20 @@ class NavigationService extends ChangeNotifier {
     try {
       final routes = data['routes'] as List;
       if (routes.isEmpty) return null;
-      
+
       final route = routes[0];
       final legs = route['legs'] as List;
       if (legs.isEmpty) return null;
-      
+
       final leg = legs[0];
       final steps = leg['steps'] as List;
       final geometry = route['geometry'];
-      
+
       // Extract route info
       final totalDistance = (route['distance'] as num).toDouble();
-      final totalDuration = (route['duration'] as num).toDouble() / 60; // Convert to minutes
-      
+      final totalDuration =
+          (route['duration'] as num).toDouble() / 60; // Convert to minutes
+
       // Extract turn-by-turn instructions from Mapbox steps
       final instructions = <NavigationInstruction>[];
       for (final step in steps) {
@@ -345,12 +469,12 @@ class NavigationService extends ChangeNotifier {
           instructions.add(instruction);
         }
       }
-      
+
       // Extract start and end coordinates from geometry
       final coordinates = geometry['coordinates'] as List;
       final startCoord = coordinates.first;
       final endCoord = coordinates.last;
-      
+
       return NavigationRoute(
         startPoint: NavigationCoordinate(
           latitude: (startCoord[1] as num).toDouble(),
@@ -377,12 +501,16 @@ class NavigationService extends ChangeNotifier {
       final maneuver = step['maneuver'];
       final instruction = maneuver['instruction'] as String;
       final distance = (step['distance'] as num).toDouble();
-      final duration = (step['duration'] as num).toDouble() / 60; // Convert to minutes
-      final type = _mapboxManeuverToType(maneuver['type'] as String, maneuver['modifier']);
-      
+      final duration =
+          (step['duration'] as num).toDouble() / 60; // Convert to minutes
+      final type = _mapboxManeuverToType(
+        maneuver['type'] as String,
+        maneuver['modifier'],
+      );
+
       // Get coordinate from maneuver location
       final location = maneuver['location'] as List;
-      
+
       return NavigationInstruction(
         instruction: instruction,
         distance: distance,
@@ -400,17 +528,24 @@ class NavigationService extends ChangeNotifier {
   }
 
   /// Map Mapbox maneuver types to our navigation instruction types
-  NavigationInstructionType _mapboxManeuverToType(String type, dynamic modifier) {
+  NavigationInstructionType _mapboxManeuverToType(
+    String type,
+    dynamic modifier,
+  ) {
     switch (type) {
       case 'depart':
         return NavigationInstructionType.start;
       case 'turn':
         if (modifier == 'left') return NavigationInstructionType.turnLeft;
         if (modifier == 'right') return NavigationInstructionType.turnRight;
-        if (modifier == 'sharp left') return NavigationInstructionType.sharpLeft;
-        if (modifier == 'sharp right') return NavigationInstructionType.sharpRight;
-        if (modifier == 'slight left') return NavigationInstructionType.slightLeft;
-        if (modifier == 'slight right') return NavigationInstructionType.slightRight;
+        if (modifier == 'sharp left')
+          return NavigationInstructionType.sharpLeft;
+        if (modifier == 'sharp right')
+          return NavigationInstructionType.sharpRight;
+        if (modifier == 'slight left')
+          return NavigationInstructionType.slightLeft;
+        if (modifier == 'slight right')
+          return NavigationInstructionType.slightRight;
         return NavigationInstructionType.straight;
       case 'continue':
       case 'merge':
@@ -427,11 +562,21 @@ class NavigationService extends ChangeNotifier {
 
   /// Fallback basic routing using simple calculations
   Future<NavigationRoute?> _calculateBasicRoute(
-    double startLat, double startLng, double endLat, double endLng) async {
+    double startLat,
+    double startLng,
+    double endLat,
+    double endLng,
+  ) async {
     try {
-      final distance = Geolocator.distanceBetween(startLat, startLng, endLat, endLng);
-      final duration = (distance / 1000) / 50 * 60; // Assume 50 km/h, convert to minutes
-      
+      final distance = Geolocator.distanceBetween(
+        startLat,
+        startLng,
+        endLat,
+        endLng,
+      );
+      final duration =
+          (distance / 1000) / 50 * 60; // Assume 50 km/h, convert to minutes
+
       // Create basic instructions
       final instructions = [
         NavigationInstruction(
@@ -439,7 +584,10 @@ class NavigationService extends ChangeNotifier {
           distance: distance,
           duration: duration,
           type: NavigationInstructionType.start,
-          coordinate: NavigationCoordinate(latitude: startLat, longitude: startLng),
+          coordinate: NavigationCoordinate(
+            latitude: startLat,
+            longitude: startLng,
+          ),
         ),
         NavigationInstruction(
           instruction: 'You have arrived at your destination',
@@ -449,16 +597,22 @@ class NavigationService extends ChangeNotifier {
           coordinate: NavigationCoordinate(latitude: endLat, longitude: endLng),
         ),
       ];
-      
+
       return NavigationRoute(
-        startPoint: NavigationCoordinate(latitude: startLat, longitude: startLng),
+        startPoint: NavigationCoordinate(
+          latitude: startLat,
+          longitude: startLng,
+        ),
         endPoint: NavigationCoordinate(latitude: endLat, longitude: endLng),
         totalDistance: distance,
         totalDuration: duration,
         instructions: instructions,
         geometry: {
           'type': 'LineString',
-          'coordinates': [[startLng, startLat], [endLng, endLat]],
+          'coordinates': [
+            [startLng, startLat],
+            [endLng, endLat],
+          ],
         },
       );
     } catch (e) {
@@ -472,21 +626,25 @@ class NavigationService extends ChangeNotifier {
     if (_currentInstructionIndex < _instructions.length - 1) {
       _currentInstructionIndex++;
       _currentInstruction = _instructions[_currentInstructionIndex];
-      
+
       // 🆕 ISSUE FIX #2 & #3: Clear announcement history for new instruction
       _announcementManager.clearAnnouncementsForNewInstruction();
-      
+
       // Send new instruction
       _instructionController.add(_currentInstruction!);
-      
+
       // Fire instruction changed event
-      _eventController.add(NavigationEvent(
-        type: NavigationEventType.instructionChanged,
-        instruction: _currentInstruction,
-      ));
-      
-      debugPrint('📍 Advanced to instruction: ${_currentInstruction!.instruction}');
-      
+      _eventController.add(
+        NavigationEvent(
+          type: NavigationEventType.instructionChanged,
+          instruction: _currentInstruction,
+        ),
+      );
+
+      debugPrint(
+        '📍 Advanced to instruction: ${_currentInstruction!.instruction}',
+      );
+
       // 🆕 ISSUE FIX #3: Immediately announce new instruction
       if (_currentInstruction != null) {
         _announcementManager.announceImmediateInstruction(_currentInstruction!);
@@ -499,14 +657,14 @@ class NavigationService extends ChangeNotifier {
     try {
       // Announce arrival with voice
       await _announcementManager.announceArrival();
-      
+
       // Fire arrival event
-      _eventController.add(NavigationEvent(
-        type: NavigationEventType.arrivedAtDestination,
-      ));
-      
+      _eventController.add(
+        NavigationEvent(type: NavigationEventType.arrivedAtDestination),
+      );
+
       debugPrint('🎯 Arrived at destination!');
-      
+
       // Stop navigation
       await stopNavigation();
     } catch (e) {
@@ -521,7 +679,7 @@ class NavigationService extends ChangeNotifier {
       distanceRemaining: _distanceRemaining,
       estimatedTimeToArrival: _estimatedTimeToArrival,
       currentInstruction: _currentInstruction,
-      progress: _currentRoute != null 
+      progress: _currentRoute != null
           ? 1 - (_distanceRemaining / _currentRoute!.totalDistance)
           : 0,
     );
@@ -589,9 +747,12 @@ class NavigationService extends ChangeNotifier {
 
   /// Integration with existing DriverFlowService
   /// This method can be called when delivery status changes
-  Future<void> handleDeliveryStatusChange(String deliveryId, String newStatus) async {
+  Future<void> handleDeliveryStatusChange(
+    String deliveryId,
+    String newStatus,
+  ) async {
     if (!_isNavigating) return;
-    
+
     // Stop navigation if delivery is completed or cancelled
     if (newStatus == 'completed' || newStatus == 'cancelled') {
       await stopNavigation();
@@ -639,10 +800,7 @@ class NavigationCoordinate {
   final double latitude;
   final double longitude;
 
-  NavigationCoordinate({
-    required this.latitude,
-    required this.longitude,
-  });
+  NavigationCoordinate({required this.latitude, required this.longitude});
 }
 
 class NavigationProgress {

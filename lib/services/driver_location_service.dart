@@ -7,7 +7,8 @@ import 'ably_service.dart';
 /// Simple location tracking service that publishes to Ably
 /// Based on DRIVER_APP_ABLY_GUIDE.md
 class DriverLocationService {
-  static final DriverLocationService _instance = DriverLocationService._internal();
+  static final DriverLocationService _instance =
+      DriverLocationService._internal();
   factory DriverLocationService() => _instance;
   DriverLocationService._internal();
 
@@ -27,17 +28,19 @@ class DriverLocationService {
     if (!_ably.isConnected) {
       debugPrint('⚠️ Ably not connected - attempting to reconnect...');
       await _ably.reconnect();
-      
+
       // Wait a bit for connection
       await Future.delayed(const Duration(seconds: 2));
-      
+
       if (!_ably.isConnected) {
-        debugPrint('❌ ERROR: Ably still not connected - location tracking may fail!');
+        debugPrint(
+          '❌ ERROR: Ably still not connected - location tracking may fail!',
+        );
       }
     }
 
     _activeDeliveryId = deliveryId;
-    
+
     // Enter presence to show driver is online
     try {
       await _ably.enterPresence(deliveryId);
@@ -45,7 +48,7 @@ class DriverLocationService {
     } catch (e) {
       debugPrint('❌ Failed to enter presence: $e');
     }
-    
+
     // Start publishing location every 3-5 seconds
     _locationTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
       await _publishCurrentLocation();
@@ -62,11 +65,17 @@ class DriverLocationService {
         desiredAccuracy: LocationAccuracy.high,
       );
 
-      // Get battery level
-      final batteryLevel = await _battery.batteryLevel;
+      // Get battery level (optional - may fail on simulators)
+      int? batteryLevel;
+      try {
+        batteryLevel = await _battery.batteryLevel;
+      } catch (e) {
+        debugPrint('⚠️ Battery info unavailable (simulator?): $e');
+        batteryLevel = null; // Battery info not available on iOS simulator
+      }
 
       // Publish to Ably with exact format from guide
-      await _ably.publishLocation(_activeDeliveryId!, {
+      final locationData = {
         'delivery_id': _activeDeliveryId,
         'latitude': position.latitude,
         'longitude': position.longitude,
@@ -74,10 +83,18 @@ class DriverLocationService {
         'bearing': position.heading,
         'speed': position.speed,
         'accuracy': position.accuracy,
-        'battery_level': batteryLevel,
-      });
+      };
 
-      debugPrint('📍 Location published: ${position.latitude}, ${position.longitude}');
+      // Only include battery level if available
+      if (batteryLevel != null) {
+        locationData['battery_level'] = batteryLevel;
+      }
+
+      await _ably.publishLocation(_activeDeliveryId!, locationData);
+
+      debugPrint(
+        '📍 Location published: ${position.latitude}, ${position.longitude}',
+      );
     } catch (e) {
       debugPrint('❌ Failed to publish location: $e');
     }
@@ -91,10 +108,10 @@ class DriverLocationService {
     }
 
     final deliveryToStop = _activeDeliveryId!;
-    
+
     // CRITICAL: Clear active delivery ID FIRST to prevent timer callbacks
     _activeDeliveryId = null;
-    
+
     // Cancel timer
     _locationTimer?.cancel();
     _locationTimer = null;
@@ -105,7 +122,7 @@ class DriverLocationService {
     } catch (e) {
       debugPrint('⚠️ Error leaving presence: $e');
     }
-    
+
     debugPrint('🛑 Stopped location tracking for delivery: $deliveryToStop');
   }
 
